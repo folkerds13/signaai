@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.env
+*.pem
+*.key
+# Never commit passphrases or secrets
+secrets.txt
+passphrase.txt

@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "signaai"
+version = "0.1.0"
+description = "AI agent infrastructure on Signum blockchain — payments, identity, verifiable outputs, and trustless escrow"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+keywords = ["signum", "blockchain", "ai-agents", "payments", "escrow", "smart-contracts"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+]
+
+# No external dependencies — uses only Python stdlib
+dependencies = []
+
+[project.scripts]
+signaai-wallet   = "signaai.wallet:main"
+signaai-identity = "signaai.identity:main"
+signaai-verify   = "signaai.verify:main"
+signaai-escrow   = "signaai.escrow:main"
+signaai-at       = "signaai.at_escrow:main"
+signaai-arbitrate = "signaai.arbitration:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["signaai*"]
+
+[tool.setuptools.package-data]
+signaai = ["contracts/*.smart"]
