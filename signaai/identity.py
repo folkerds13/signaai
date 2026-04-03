@@ -195,38 +195,56 @@ def record_task_completion(passphrase, task_id, result_hash, rating=5, network=N
     return result.get("transaction"), None
 
 
-def list_agents(network=None):
-    """List all registered SignaAI agents."""
+# Well-known registry accounts — agents registered by these accounts appear
+# in the public marketplace. Anyone can register; add your account here.
+REGISTRY_ACCOUNTS = [
+    "S-PS4K-2KE2-8LEV-HD2YE",  # SignaAI dev
+    "S-44S7-32XB-5DM5-5AL3K",  # SignaAI worker
+]
+
+
+def list_agents(accounts=None, network=None):
+    """
+    List all registered SignaAI agents.
+    Scans aliases for each account in the registry (or a custom list).
+    """
     api = get_api(network)
-    result = api.get("getAliases", aliasName=ALIAS_PREFIX, timestamp=0)
+    accounts_to_scan = accounts or REGISTRY_ACCOUNTS
     agents = []
-    for alias in (result.get("aliases") or []):
-        uri = alias.get("aliasURI", "")
-        if "sig-agent:" not in uri:
-            continue
-        metadata = {}
-        try:
-            metadata = json.loads(uri.split("sig-agent:")[1])
-        except:
-            pass
-        agents.append({
-            "alias": alias.get("aliasName"),
-            "address": metadata.get("address", ""),
-            "name": metadata.get("name", alias.get("aliasName")),
-            "capabilities": metadata.get("capabilities", []),
-            "description": metadata.get("description", ""),
-            "version": metadata.get("version", ""),
-        })
+    seen = set()
+    for account in accounts_to_scan:
+        result = api.get("getAliases", account=account)
+        for alias in (result.get("aliases") or []):
+            uri = alias.get("aliasURI", "")
+            if "sig-agent:" not in uri:
+                continue
+            alias_name = alias.get("aliasName")
+            if alias_name in seen:
+                continue
+            seen.add(alias_name)
+            metadata = {}
+            try:
+                metadata = json.loads(uri.split("sig-agent:")[1])
+            except:
+                pass
+            agents.append({
+                "alias": alias_name,
+                "address": metadata.get("address", ""),
+                "name": metadata.get("name", alias_name),
+                "capabilities": metadata.get("capabilities", []),
+                "description": metadata.get("description", ""),
+                "version": metadata.get("version", ""),
+            })
     return agents
 
 
-def search_agents(capability=None, network=None):
+def search_agents(capability=None, accounts=None, network=None):
     """
-    Search the agent marketplace.
-    Returns agents filtered by capability (case-insensitive substring match).
+    Search the agent marketplace by capability (case-insensitive substring match).
     If no capability given, returns all registered agents.
+    Pass accounts=[...] to search agents registered by specific wallets.
     """
-    agents = list_agents(network)
+    agents = list_agents(accounts=accounts, network=network)
     if not capability:
         return agents
     cap_lower = capability.lower()
@@ -342,7 +360,7 @@ def main():
                 print(f"  {a['alias']:<30} {a['address']:<20} [{caps}]")
 
     elif args.cmd == "search":
-        agents = search_agents(args.capability, args.network)
+        agents = search_agents(capability=args.capability, network=args.network)
         label = f"capability '{args.capability}'" if args.capability else "all capabilities"
         if not agents:
             print(f"No agents found for {label}.")
