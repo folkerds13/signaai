@@ -7,6 +7,7 @@ import json
 import urllib.request
 import urllib.parse
 from datetime import datetime
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 
 # ── Constants ────────────────────────────────────────────────────────────────
 NQT = 100_000_000          # 1 SIGNA = 100,000,000 NQT (Nano-Quant)
@@ -41,13 +42,13 @@ class SignumAPI:
                     query = urllib.parse.urlencode(params)
                     req = urllib.request.Request(
                         f"{url}?{query}",
-                        headers={"User-Agent": "SigSkill/1.0"}
+                        headers={"User-Agent": "SignaAI/0.1.0"}
                     )
                 else:
                     data = urllib.parse.urlencode(params).encode()
                     req = urllib.request.Request(
                         url, data=data,
-                        headers={"User-Agent": "SigSkill/1.0",
+                        headers={"User-Agent": "SignaAI/0.1.0",
                                  "Content-Type": "application/x-www-form-urlencoded"}
                     )
                 with urllib.request.urlopen(req, timeout=15) as resp:
@@ -81,7 +82,16 @@ def signa(nqt):
 
 def nqt(amount_signa):
     """Convert SIGNA float to NQT int."""
-    return int(float(amount_signa) * NQT)
+    try:
+        amount = Decimal(str(amount_signa))
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"Invalid SIGNA amount: {amount_signa!r}") from exc
+
+    if amount < 0:
+        raise ValueError("SIGNA amount cannot be negative")
+
+    amount = amount.quantize(Decimal("0.00000001"), rounding=ROUND_DOWN)
+    return int(amount * NQT)
 
 def ts(timestamp_signum):
     """Convert Signum genesis-relative timestamp to datetime string.

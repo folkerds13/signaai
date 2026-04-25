@@ -11,13 +11,13 @@ Funds flow through the escrow operator wallet (dev wallet for prototype).
 Upgrade path: replace operator wallet with an AT contract for full trustlessness.
 
 On-chain message format:
-  ESCROW:CREATE:<escrow_id>:<worker>:<amount_nqt>:<result_hash>:<deadline_block>
+  ESCROW:CREATE:<escrow_id>:<worker>:<amount_nqt>:<task_hash>:<deadline_block>:<operator>
   ESCROW:SUBMIT:<escrow_id>:<result_hash>
   ESCROW:RELEASE:<escrow_id>:<worker>
   ESCROW:REFUND:<escrow_id>:<payer>
 
 Usage:
-  python3 escrow.py create <payer_passphrase> <worker_address> <amount> "<task_description>" [--deadline-hours 24]
+  python3 escrow.py create <payer_passphrase> <worker_address> <amount> "<task_description>" --operator-address <operator>
   python3 escrow.py submit <worker_passphrase> <escrow_id> "<result_content>" [--sources "url1,url2"]
   python3 escrow.py release <operator_passphrase> <escrow_id>
   python3 escrow.py refund <operator_passphrase> <escrow_id>
@@ -48,8 +48,9 @@ STATE_REFUNDED  = "REFUNDED"
 
 # ── Core Functions ────────────────────────────────────────────────────────────
 
-def create_escrow(payer_passphrase, worker_address, amount_signa,
-                  task_description, deadline_hours=24, network=None):
+def create_escrow(payer_passphrase, worker_address, amount_signa=None,
+                  task_description="", deadline_hours=24, operator_address=None,
+                  network=None, amount=None):
     """
     Create an escrow agreement on-chain.
 
@@ -62,6 +63,18 @@ def create_escrow(payer_passphrase, worker_address, amount_signa,
     Returns escrow_id and full escrow record.
     """
     api = get_api(network)
+    if amount_signa is None:
+        amount_signa = amount
+    elif amount is not None and str(amount) != str(amount_signa):
+        return None, "Specify amount only once"
+    if amount_signa is None:
+        return None, "Amount is required"
+    if not task_description:
+        return None, "task_description is required"
+
+    operator_address = operator_address or os.environ.get("SIGNAAI_ESCROW_OPERATOR")
+    if not operator_address:
+        return None, "operator_address is required (or set SIGNAAI_ESCROW_OPERATOR)"
 
     # Get payer address
     payer_address, err = get_my_address(payer_passphrase, network)
@@ -82,17 +95,23 @@ def create_escrow(payer_passphrase, worker_address, amount_signa,
     # Hash the task description — this is what the worker must reference
     task_hash = hashlib.sha256(task_description.encode()).hexdigest()[:32]
 
-    amount_nqt = nqt(amount_signa)
+    try:
+        amount_nqt = nqt(amount_signa)
+    except ValueError as exc:
+        return None, str(exc)
+    if amount_nqt <= 0:
+        return None, "Amount must be greater than zero"
 
     # Build on-chain record message
     message = (f"{ESCROW_PREFIX}CREATE:{escrow_id}:"
-               f"{worker_address}:{amount_nqt}:{task_hash}:{deadline_block}")
+               f"{worker_address}:{amount_nqt}:{task_hash}:{deadline_block}:"
+               f"{operator_address}")
 
-    # Step 1: Record escrow creation (payer → self) via sendMessage (no amount required)
+    # Step 1: Record escrow creation with the operator so status scans can reconstruct it.
     print(f"  Recording escrow on-chain...")
     record_result = api.post("sendMessage",
                              secretPhrase=payer_passphrase,
-                             recipient=payer_address,
+                             recipient=operator_address,
                              message=message,
                              messageIsText="true",
                              feeNQT=FEE_MESSAGE)
@@ -100,13 +119,13 @@ def create_escrow(payer_passphrase, worker_address, amount_signa,
         return None, f"Failed to record escrow: {record_result.get('error')}"
     record_tx = record_result.get("transaction")
 
-    # Step 2: Transfer funds to escrow operator (using same wallet for prototype)
+    # Step 2: Transfer funds to escrow operator.
     # In production: this sends to the AT contract address
     print(f"  Transferring {amount_signa} SIGNA to escrow...")
     time.sleep(2)  # brief pause between transactions
 
     fund_message = f"{ESCROW_PREFIX}FUND:{escrow_id}"
-    fund_tx, err = send_signa(payer_passphrase, payer_address, amount_signa,
+    fund_tx, err = send_signa(payer_passphrase, operator_address, amount_signa,
                               message=fund_message, network=network)
     if err:
         return None, f"Failed to fund escrow: {err}"
@@ -116,6 +135,7 @@ def create_escrow(payer_passphrase, worker_address, amount_signa,
         "state": STATE_CREATED,
         "payer": payer_address,
         "worker": worker_address,
+        "operator": operator_address,
         "amount_signa": amount_signa,
         "task_description": task_description,
         "task_hash": task_hash,
@@ -182,7 +202,8 @@ def submit_result(worker_passphrase, escrow_id, result_content,
     }, None
 
 
-def release_payment(operator_passphrase, escrow_id, network=None):
+def release_payment(operator_passphrase, escrow_id, expected_result_hash=None,
+                    approve=False, network=None):
     """
     Release escrow funds to worker after verifying result hash matches.
     Called by operator after confirming submission is valid.
@@ -209,9 +230,12 @@ def release_payment(operator_passphrase, escrow_id, network=None):
     if not worker:
         return None, "Could not determine worker address from escrow record"
 
-    # Verify hashes match
+    # Verify the submitted output hash when the caller has an expected hash.
     submitted_hash = escrow_data.get("submitted_hash", "")
-    task_hash = escrow_data.get("task_hash", "")
+    if expected_result_hash and submitted_hash != expected_result_hash:
+        return None, "Submitted hash does not match expected_result_hash"
+    if not expected_result_hash and not approve:
+        return None, "Pass expected_result_hash or approve=True to release payment"
 
     print(f"  Releasing {amount} SIGNA to {worker}...")
 
@@ -244,15 +268,21 @@ def refund_escrow(operator_passphrase, escrow_id, network=None):
     if err:
         return None, err
 
+    if escrow_data["state"] == "UNKNOWN":
+        return None, "Escrow not found for this operator address"
     if escrow_data["state"] == STATE_RELEASED:
         return None, "Escrow already released — cannot refund"
+    if escrow_data["state"] == STATE_REFUNDED:
+        return None, "Escrow already refunded"
 
     # Check deadline
     status = api.get("getBlockchainStatus")
     current_block = int(status.get("numberOfBlocks", 0))
     deadline_block = escrow_data.get("deadline_block", 0)
 
-    if current_block < deadline_block and escrow_data["state"] != STATE_CREATED:
+    if not deadline_block:
+        return None, "Could not determine escrow deadline"
+    if current_block < deadline_block:
         blocks_left = deadline_block - current_block
         hours_left = blocks_left / BLOCKS_PER_HOUR
         return None, f"Deadline not reached — {blocks_left} blocks ({hours_left:.1f}h) remaining"
@@ -342,39 +372,42 @@ def _parse_escrow_from_txs(escrow_id, transactions):
     STATE_RANK = {STATE_CREATED: 0, STATE_SUBMITTED: 1,
                   STATE_RELEASED: 2, STATE_REFUNDED: 2}
 
-    escrow = {"escrow_id": escrow_id, "state": STATE_CREATED}
+    escrow = {"escrow_id": escrow_id, "state": "UNKNOWN"}
     best_rank = -1
 
     for tx in transactions:
         msg = tx.get("attachment", {}).get("message", "")
         if not msg.startswith(ESCROW_PREFIX):
             continue
-        if escrow_id not in msg:
-            continue
 
         parts = msg[len(ESCROW_PREFIX):].split(":")
         action = parts[0] if parts else ""
+        payload = parts[2:] if len(parts) > 2 and parts[1].startswith("v") else parts[1:]
+        if not payload or payload[0] != escrow_id:
+            continue
 
-        if action == "CREATE" and len(parts) >= 6:
+        if action == "CREATE" and len(payload) >= 5:
             # Always extract base data from CREATE regardless of rank
+            amount_nqt = int(payload[2]) if payload[2].isdigit() else 0
             escrow.update({
                 "payer": tx.get("senderRS"),
-                "worker": parts[2],
-                "amount_nqt": int(parts[3]) if parts[3].isdigit() else 0,
-                "amount_signa": int(parts[3]) / 100_000_000 if parts[3].isdigit() else 0,
-                "task_hash": parts[4],
-                "deadline_block": int(parts[5]) if parts[5].isdigit() else 0,
+                "worker": payload[1],
+                "amount_nqt": amount_nqt,
+                "amount_signa": amount_nqt / 100_000_000,
+                "task_hash": payload[3],
+                "deadline_block": int(payload[4]) if payload[4].isdigit() else 0,
+                "operator": payload[5] if len(payload) > 5 else tx.get("recipientRS"),
                 "create_tx": tx.get("transaction"),
                 "created_at": ts(tx.get("timestamp")),
             })
             if STATE_RANK[STATE_CREATED] > best_rank:
                 escrow["state"] = STATE_CREATED
                 best_rank = STATE_RANK[STATE_CREATED]
-        elif action == "SUBMIT" and len(parts) >= 3:
+        elif action == "SUBMIT" and len(payload) >= 2:
             if STATE_RANK[STATE_SUBMITTED] > best_rank:
                 escrow.update({
                     "state": STATE_SUBMITTED,
-                    "submitted_hash": parts[2],
+                    "submitted_hash": payload[1],
                     "submit_tx": tx.get("transaction"),
                     "submitted_at": ts(tx.get("timestamp")),
                     "submitted_by": tx.get("senderRS"),
@@ -408,13 +441,14 @@ def main():
                         choices=["mainnet", "testnet"])
     sub = parser.add_subparsers(dest="cmd")
 
-    # create
     p = sub.add_parser("create", help="Create a new escrow")
     p.add_argument("payer_passphrase")
     p.add_argument("worker_address")
     p.add_argument("amount", type=float, help="SIGNA amount")
     p.add_argument("task_description")
     p.add_argument("--deadline-hours", type=int, default=24)
+    p.add_argument("--operator-address", default=None,
+                   help="Escrow operator address; defaults to SIGNAAI_ESCROW_OPERATOR")
 
     # submit
     p = sub.add_parser("submit", help="Worker submits completed result")
@@ -427,6 +461,10 @@ def main():
     p = sub.add_parser("release", help="Release payment to worker")
     p.add_argument("operator_passphrase")
     p.add_argument("escrow_id")
+    p.add_argument("--expected-hash", default=None,
+                   help="Expected submitted result hash")
+    p.add_argument("--approve", action="store_true",
+                   help="Release after off-chain/manual approval when no expected hash is available")
 
     # refund
     p = sub.add_parser("refund", help="Refund payment to payer")
@@ -445,7 +483,9 @@ def main():
         print(f"Creating escrow on {args.network}...")
         result, err = create_escrow(
             args.payer_passphrase, args.worker_address, args.amount,
-            args.task_description, args.deadline_hours, args.network
+            args.task_description, args.deadline_hours,
+            operator_address=args.operator_address,
+            network=args.network
         )
         if err:
             print(f"Error: {err}")
@@ -454,6 +494,7 @@ def main():
             print(f"  Escrow ID:    {result['escrow_id']}")
             print(f"  Payer:        {result['payer']}")
             print(f"  Worker:       {result['worker']}")
+            print(f"  Operator:     {result['operator']}")
             print(f"  Amount:       {result['amount_signa']} SIGNA")
             print(f"  Task hash:    {result['task_hash']}")
             print(f"  Deadline:     block {result['deadline_block']} (~{result['deadline_hours']}h)")
@@ -480,7 +521,10 @@ def main():
     elif args.cmd == "release":
         print(f"Releasing escrow {args.escrow_id}...")
         result, err = release_payment(
-            args.operator_passphrase, args.escrow_id, args.network
+            args.operator_passphrase, args.escrow_id,
+            expected_result_hash=args.expected_hash,
+            approve=args.approve,
+            network=args.network
         )
         if err:
             print(f"Error: {err}")

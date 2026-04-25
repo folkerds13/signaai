@@ -23,6 +23,7 @@ import os
 import struct
 import hashlib
 import secrets
+import math
 sys.path.insert(0, os.path.dirname(__file__))
 from .api import get_api, signa, nqt, FEE_STANDARD, FEE_MESSAGE, ok
 from .wallet import get_my_address, send_signa
@@ -62,14 +63,14 @@ def sha256_str(text):
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-def build_data_field(preimage_hex, worker_account_id, deadline_minutes):
+def build_data_field(preimage_hex, worker_account_id, deadline_minutes, network=None):
     """
     Build the AT data initialization field.
 
-    Memory layout (little-endian 64-bit longs):
-      [0-3] hashedKey  — SHA256(preimage), split into 4 x 8 bytes
-      [4]   worker     — worker account ID (numeric)
-      [5]   deadlineMinutes
+    Memory layout (little-endian 64-bit longs), matching signaai_escrow.smart:
+      [0]   worker        — worker account ID (numeric)
+      [1]   deadlineBlock — absolute block height for refund
+      [2-5] hashedKey     — SHA256(preimage), split into 4 x 8 bytes
 
     Returns hex string for the 'data' parameter in createATProgram.
     """
@@ -84,10 +85,29 @@ def build_data_field(preimage_hex, worker_account_id, deadline_minutes):
         val = struct.unpack('<q', chunk)[0]
         hash_parts.append(encode_long_le(val))
 
-    worker_encoded  = encode_long_le(worker_account_id)
-    deadline_encoded = encode_long_le(deadline_minutes)
+    api = get_api(network)
+    status = api.get("getBlockchainStatus")
+    if not ok(status):
+        raise RuntimeError("Could not get blockchain status")
+    current_block = int(status.get("numberOfBlocks", 0))
+    deadline_blocks = max(1, math.ceil(deadline_minutes / 4))
+    deadline_block = current_block + deadline_blocks
 
-    return "".join(hash_parts) + worker_encoded + deadline_encoded
+    worker_encoded = encode_long_le(worker_account_id)
+    deadline_encoded = encode_long_le(deadline_block)
+
+    return worker_encoded + deadline_encoded + "".join(hash_parts)
+
+
+def build_data_field_for_deadline(preimage_hex, worker_account_id, deadline_block):
+    """Build the AT data field for a known absolute deadline block."""
+    hash_bytes = hashlib.sha256(bytes.fromhex(preimage_hex)).digest()
+    hash_parts = []
+    for i in range(4):
+        chunk = hash_bytes[i*8:(i+1)*8]
+        val = struct.unpack('<q', chunk)[0]
+        hash_parts.append(encode_long_le(val))
+    return encode_long_le(worker_account_id) + encode_long_le(deadline_block) + "".join(hash_parts)
 
 
 def encode_preimage_message(preimage_hex):
@@ -123,8 +143,15 @@ def deploy_at(payer_passphrase, worker_address, deadline_minutes, preimage_hex, 
         return None, f"Could not find worker account: {worker_info.get('error')}"
     worker_id = int(worker_info.get("account", 0))
 
+    status = api.get("getBlockchainStatus")
+    if not ok(status):
+        return None, "Could not get blockchain status"
+    current_block = int(status.get("numberOfBlocks", 0))
+    deadline_blocks = max(1, math.ceil(deadline_minutes / 4))
+    deadline_block = current_block + deadline_blocks
+
     # Build data field
-    data_hex = build_data_field(preimage_hex, worker_id, deadline_minutes)
+    data_hex = build_data_field_for_deadline(preimage_hex, worker_id, deadline_block)
 
     # AT deployment fee minimum is 0.5 SIGNA on mainnet
     deploy_fee_nqt = 50_000_000  # 0.5 SIGNA
@@ -168,6 +195,7 @@ def deploy_at(payer_passphrase, worker_address, deadline_minutes, preimage_hex, 
         "at_address": at_address,
         "worker": worker_address,
         "deadline_minutes": deadline_minutes,
+        "deadline_block": deadline_block,
         "preimage_hash": sha256_hex(preimage_hex),
     }, None
 
@@ -290,6 +318,7 @@ def main():
             print(f"  Deploy TX:    {result['tx_id']}")
             print(f"  Worker:       {result['worker']}")
             print(f"  Deadline:     {result['deadline_minutes']} min ({result['deadline_minutes']//60}h)")
+            print(f"  Deadline blk: {result['deadline_block']}")
             print(f"  Preimage hash:{result['preimage_hash'][:32]}...")
             print(f"\n  Next: fund the AT by sending SIGNA to {result['at_address']}")
             print(f"  python3 wallet.py --network {args.network} send \"<passphrase>\" {result['at_address']} <amount>")

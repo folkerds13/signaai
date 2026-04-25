@@ -31,19 +31,33 @@ def get_balance(address, network=None):
     return {"confirmed": bal, "unconfirmed": unconf, "address": result.get("accountRS")}, None
 
 
-def send_signa(passphrase, recipient, amount_signa, message=None,
-               recipient_public_key=None, network=None):
+def send_signa(passphrase, recipient, amount_signa=None, message=None,
+               recipient_public_key=None, network=None, amount=None):
     """
     Send SIGNA to a recipient.
     Returns transaction ID on success.
     """
     api = get_api(network)
+    if amount_signa is None:
+        amount_signa = amount
+    elif amount is not None and str(amount) != str(amount_signa):
+        return None, "Specify amount only once"
+    if amount_signa is None:
+        return None, "Amount is required"
+
+    try:
+        amount_nqt = nqt(amount_signa)
+    except ValueError as exc:
+        return None, str(exc)
+    if amount_nqt <= 0:
+        return None, "Amount must be greater than zero"
+
     fee = FEE_MESSAGE if message else FEE_STANDARD
 
     params = {
         "secretPhrase": passphrase,
         "recipient": recipient,
-        "amountNQT": nqt(amount_signa),
+        "amountNQT": amount_nqt,
         "feeNQT": fee,
     }
 
@@ -146,7 +160,7 @@ def main():
     elif args.cmd == "send":
         print(f"Sending {args.amount} SIGNA to {args.recipient}...")
         tx_id, err = send_signa(args.passphrase, args.recipient, args.amount,
-                                args.message, args.network)
+                                args.message, network=args.network)
         if err:
             print(f"Error: {err}")
         else:

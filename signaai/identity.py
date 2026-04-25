@@ -33,7 +33,7 @@ TASK_COMPLETE_PREFIX = "TASK_COMPLETE:"
 
 
 def register_agent(passphrase, agent_name, capabilities=None, version="1.0",
-                   description="", network=None):
+                   description="", endpoint="", network=None):
     """
     Register an AI agent identity on Signum.
     Uses the alias system to map a human-readable name to an address.
@@ -55,6 +55,7 @@ def register_agent(passphrase, agent_name, capabilities=None, version="1.0",
         "version": version,
         "capabilities": capabilities or [],
         "description": description,
+        "endpoint": endpoint,
     }
 
     # Store as JSON in alias URI
@@ -166,6 +167,19 @@ def get_agent_profile(address, network=None):
     }, None
 
 
+def get_reputation(address, network=None):
+    """Return the public reputation summary for an agent address."""
+    profile, err = get_agent_profile(address, network)
+    if err:
+        return None, err
+    return {
+        "address": profile["address"],
+        "tasks_completed": profile["tasks_completed"],
+        "avg_rating": profile["avg_rating"],
+        "reputation_score": profile["reputation_score"],
+    }, None
+
+
 def record_task_completion(passphrase, task_id, result_hash, rating=5, network=None):
     """
     Record a completed task on-chain.
@@ -175,6 +189,9 @@ def record_task_completion(passphrase, task_id, result_hash, rating=5, network=N
     result_hash: SHA-256 hash of the delivered result (from verify.py)
     rating:      1-5 self-reported or third-party rating
     """
+    if rating < 1 or rating > 5:
+        return None, "Rating must be between 1 and 5"
+
     api = get_api(network)
     address, err = get_my_address(passphrase, network)
     if err:
@@ -233,6 +250,7 @@ def list_agents(accounts=None, network=None):
                 "name": metadata.get("name", alias_name),
                 "capabilities": metadata.get("capabilities", []),
                 "description": metadata.get("description", ""),
+                "endpoint": metadata.get("endpoint", ""),
                 "version": metadata.get("version", ""),
             })
     return agents
@@ -275,12 +293,16 @@ def main():
     p.add_argument("agent_name")
     p.add_argument("--capabilities", default="", help="Comma-separated list")
     p.add_argument("--description", default="")
+    p.add_argument("--endpoint", default="")
     p.add_argument("--version", default="1.0")
 
     p = sub.add_parser("lookup", help="Look up an agent by name")
     p.add_argument("agent_name")
 
     p = sub.add_parser("profile", help="Full agent profile + reputation")
+    p.add_argument("address")
+
+    p = sub.add_parser("reputation", help="Reputation summary for an agent")
     p.add_argument("address")
 
     p = sub.add_parser("record", help="Record a completed task (builds reputation)")
@@ -304,6 +326,7 @@ def main():
         result, err = register_agent(args.passphrase, args.agent_name,
                                      capabilities=caps,
                                      description=args.description,
+                                     endpoint=args.endpoint,
                                      version=args.version,
                                      network=args.network)
         if err:
@@ -340,6 +363,16 @@ def main():
                 for t in result['task_history'][:5]:
                     print(f"  [{t['timestamp']}] Task {t['task_id']} — rating {t['rating']}/5")
 
+    elif args.cmd == "reputation":
+        result, err = get_reputation(args.address, args.network)
+        if err:
+            print(f"Error: {err}")
+        else:
+            print(f"Address:          {result['address']}")
+            print(f"Tasks Completed:  {result['tasks_completed']}")
+            print(f"Avg Rating:       {result['avg_rating']:.1f}/5.0" if result['avg_rating'] else "Avg Rating:       —")
+            print(f"Reputation Score: {result['reputation_score']}/500")
+
     elif args.cmd == "record":
         tx_id, err = record_task_completion(args.passphrase, args.task_id,
                                             args.result_hash, args.rating,
@@ -351,7 +384,7 @@ def main():
             print(f"  TX: {tx_id}")
 
     elif args.cmd == "list":
-        agents = list_agents(args.network)
+        agents = list_agents(network=args.network)
         if not agents:
             print("No agents registered yet.")
         else:

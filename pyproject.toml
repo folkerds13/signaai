@@ -13,8 +13,13 @@ keywords = ["signum", "blockchain", "ai-agents", "payments", "escrow", "smart-co
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
     "Topic :: Software Development :: Libraries",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
 ]
 
 # No external dependencies — uses only Python stdlib
@@ -27,6 +32,11 @@ signaai-verify   = "signaai.verify:main"
 signaai-escrow   = "signaai.escrow:main"
 signaai-at       = "signaai.at_escrow:main"
 signaai-arbitrate = "signaai.arbitration:main"
+
+[project.urls]
+Homepage = "https://signaai.io"
+Repository = "https://github.com/folkerds13/signaai"
+Issues = "https://github.com/folkerds13/signaai/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -1,7 +1,8 @@
 """
 SignaAI — AI Agent Infrastructure on Signum Blockchain
 
-Three-layer stack for agent-to-agent payments, identity, and verifiable outputs.
+SDK stack for agent-to-agent payments, identity, verifiable outputs, escrow,
+and arbitration.
 Built on Signum's self-executing AT contracts (live since 2014).
 
 Layers:
@@ -10,6 +11,7 @@ Layers:
   signaai.verify    — hash and timestamp AI outputs on-chain
   signaai.escrow    — Phase 1 practical escrow (on-chain audit trail)
   signaai.at_escrow — Phase 2 trustless AT escrow (no operator needed)
+  signaai.arbitration — dispute/open-vote records for escrow flows
 
 Quick start:
   import signaai

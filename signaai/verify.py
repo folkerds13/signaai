@@ -34,6 +34,12 @@ from .wallet import get_my_address
 PROOF_PREFIX = "SIGPROOF:v1:"
 
 
+def _normalize_sources(sources):
+    if isinstance(sources, str):
+        return [s.strip() for s in sources.split(",") if s.strip()]
+    return list(sources or [])
+
+
 def hash_content(content, sources=None):
     """
     Generate a SHA-256 fingerprint of content + sources.
@@ -51,7 +57,7 @@ def hash_content(content, sources=None):
 
     content_hash = hashlib.sha256(content).hexdigest()
 
-    sources = sorted(sources or [])
+    sources = sorted(_normalize_sources(sources))
     sources_str = "|".join(sources).encode('utf-8')
     sources_hash = hashlib.sha256(sources_str).hexdigest()
 
@@ -158,6 +164,29 @@ def verify_proof(content, tx_id, sources=None, network=None):
     }
 
 
+def stamp(passphrase, content, sources=None, label="", network=None):
+    """Hash content and publish a proof in one SDK call."""
+    hashes = hash_content(content, sources)
+    result, err = publish_proof(
+        passphrase,
+        hashes["content_hash"],
+        hashes["sources_hash"],
+        label=label,
+        network=network,
+    )
+    if err:
+        return None, err
+    result["hash"] = hashes["content_hash"]
+    result["combined_hash"] = hashes["combined_hash"]
+    result["sources"] = hashes["sources"]
+    return result, None
+
+
+def check(content, tx_id, sources=None, network=None):
+    """Compatibility alias for verify_proof."""
+    return verify_proof(content, tx_id, sources=sources, network=network)
+
+
 def get_proofs(address, limit=20, network=None):
     """Get all proof records published by an address."""
     api = get_api(network)
@@ -202,6 +231,11 @@ def main():
     p.add_argument("--label", default="")
 
     p = sub.add_parser("verify", help="Verify content against an on-chain proof")
+    p.add_argument("content")
+    p.add_argument("tx_id")
+    p.add_argument("--sources", default="")
+
+    p = sub.add_parser("check", help="Alias for verify")
     p.add_argument("content")
     p.add_argument("tx_id")
     p.add_argument("--sources", default="")
@@ -255,7 +289,7 @@ def main():
             print(f"  Give the recipient this TX ID to verify your output.")
             print(f"  View:  https://explorer.signum.network/tx/{result['tx_id']}")
 
-    elif args.cmd == "verify":
+    elif args.cmd in ("verify", "check"):
         sources = [s.strip() for s in args.sources.split(",") if s.strip()]
         verified, details = verify_proof(args.content, args.tx_id, sources, args.network)
         if "error" in details:

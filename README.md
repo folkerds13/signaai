@@ -13,7 +13,7 @@ Built on Signum's self-executing AT (Automated Transaction) contracts, live sinc
 | Smart contract execution | Self-executing, no keeper | Requires external keeper or relayer |
 | Transaction fee | ~$0.00003 fixed | Variable, often $1–$50+ |
 | Energy use | <0.002% of Bitcoin | High (PoW) or validator overhead |
-| Agent-to-agent payments | Native, 4-second blocks | Possible but expensive |
+| Agent-to-agent payments | Native payments, fixed low fees | Possible but expensive |
 | Running since | 2014 (as Burstcoin) | 2015 / 2020 |
 
 Competitors (Coinbase x402, ERC-8004, Fetch.ai/ASI, Olas) are all building on Ethereum or Solana. Signum is greenfield for AI agent infrastructure.
@@ -29,7 +29,7 @@ pip install signaai
 Or from source (editable):
 
 ```bash
-git clone https://github.com/your-org/signaai
+git clone https://github.com/folkerds13/signaai
 cd signaai
 pip install -e .
 ```
@@ -126,7 +126,7 @@ rep, err = identity.get_reputation("S-XXXX-XXXX-XXXX-XXXXX")
 
 CLI:
 ```bash
-signaai-identity --network mainnet register "passphrase" my-agent --capabilities research summarization
+signaai-identity --network mainnet register "passphrase" my-agent --capabilities research,summarization
 signaai-identity --network mainnet lookup my-agent
 signaai-identity --network mainnet reputation S-XXXX-XXXX-XXXX-XXXXX
 ```
@@ -176,27 +176,37 @@ result, err = escrow.create_escrow(
     worker_address="S-WORKER-ADDRESS",
     amount=10.0,
     task_description="Summarize these 5 documents",
-    deadline_hours=24
+    deadline_hours=24,
+    operator_address="S-OPERATOR-ADDRESS"
 )
 escrow_id = result["escrow_id"]
 
 # Check status
-status, err = escrow.get_escrow_status(escrow_id, "operator passphrase")
+status, err = escrow.get_escrow_status(escrow_id, address="S-OPERATOR-ADDRESS")
 
-# Operator releases payment after verifying work
-result, err = escrow.release_payment(escrow_id, "operator passphrase")
+# Operator releases payment after verifying work.
+# Use expected_result_hash when the expected output hash is known, or approve=True
+# when the operator has performed manual/off-chain review.
+result, err = escrow.release_payment(
+    "operator passphrase",
+    escrow_id,
+    expected_result_hash="<submitted result hash>"
+)
 
 # Or operator refunds payer
-result, err = escrow.refund_escrow(escrow_id, "operator passphrase")
+result, err = escrow.refund_escrow("operator passphrase", escrow_id)
 ```
 
 CLI:
 ```bash
-signaai-escrow --network mainnet create "payer pass" S-WORKER 10.0 "task description" --deadline 24
-signaai-escrow --network mainnet status ESCROW_ID "operator pass"
-signaai-escrow --network mainnet release ESCROW_ID "operator pass"
-signaai-escrow --network mainnet refund ESCROW_ID "operator pass"
+signaai-escrow --network mainnet create "payer pass" S-WORKER 10.0 "task description" --deadline-hours 24 --operator-address S-OPERATOR
+signaai-escrow --network mainnet status ESCROW_ID --address S-OPERATOR
+signaai-escrow --network mainnet release "operator pass" ESCROW_ID --expected-hash RESULT_HASH
+signaai-escrow --network mainnet refund "operator pass" ESCROW_ID
 ```
+
+Phase 1 escrow is operator-mediated. Funds are sent to the operator wallet and
+released or refunded by that operator. For no-operator custody, use AT Escrow.
 
 ---
 
@@ -205,7 +215,7 @@ signaai-escrow --network mainnet refund ESCROW_ID "operator pass"
 A smart contract holds funds. The worker reveals a preimage → contract auto-pays. Deadline passes → contract auto-refunds. No operator, no trust required.
 
 ```python
-from signaai import at_escrow
+from signaai import at_escrow, wallet
 
 # 1. Generate a secret preimage
 preimage, preimage_hash = at_escrow.gen_preimage()
@@ -289,6 +299,26 @@ Payer                          AT Contract                    Worker
 ```
 
 The contract runs entirely on-chain. No API key, no server, no operator.
+
+---
+
+## Security Notes
+
+- Prefer testnet until your agent workflow is fully rehearsed.
+- Avoid passing real wallet passphrases on shared machines or in shell history.
+- Phase 1 escrow is an auditable operator-mediated flow, not trustless custody.
+- AT escrow is the trustless path, but should be validated on testnet before
+  handling meaningful value.
+- On-chain proof records prove content integrity and timestamp. They do not,
+  by themselves, prove the content is factually correct.
+
+---
+
+## Tests
+
+```bash
+python -m unittest discover -s tests
+```
 
 ---
 
