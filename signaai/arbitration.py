@@ -26,12 +26,9 @@ import hashlib
 sys.path.insert(0, os.path.dirname(__file__))
 from .api import get_api, signa, ts, FEE_MESSAGE, ok
 from .wallet import get_my_address
+from .protocol import build_arbit_open, build_arbit_vote, parse_arbitration, ProtocolError
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-ARBIT_OPEN_PREFIX  = "ARBIT_OPEN:"
-ARBIT_VOTE_PREFIX  = "ARBIT_VOTE:"
-ARBIT_CLOSE_PREFIX = "ARBIT_CLOSE:"
-
 # Well-known arbitrator registry alias
 ARBITRATOR_REGISTRY_ALIAS = "signaai-arbitrators"
 
@@ -59,7 +56,7 @@ def open_arbitration(passphrase, escrow_id, arbitrator_address, reason, network=
     # Hash the reason text so it's compact on-chain; claimant keeps full text
     reason_hash = hashlib.sha256(reason.encode()).hexdigest()[:16]
 
-    message = f"{ARBIT_OPEN_PREFIX}{escrow_id}:{claimant_address}:{reason_hash}"
+    message = build_arbit_open(escrow_id, claimant_address, reason_hash)
 
     print(f"  Opening arbitration for escrow {escrow_id[:12]}...")
     print(f"  Arbitrator: {arbitrator_address}")
@@ -107,7 +104,10 @@ def vote_arbitration(passphrase, escrow_id, decision, notes="", network=None):
         return None, err
 
     notes_hash = hashlib.sha256(notes.encode()).hexdigest()[:16] if notes else "none"
-    message = f"{ARBIT_VOTE_PREFIX}{escrow_id}:{decision}:{notes_hash}"
+    try:
+        message = build_arbit_vote(escrow_id, decision, notes_hash)
+    except ProtocolError as exc:
+        return None, str(exc)
 
     # Arbitrator votes by sending to themselves — public, permanent record
     result = api.post(
@@ -158,25 +158,28 @@ def get_arbitration_status(escrow_id, address, network=None):
         sender = tx.get("senderRS", "")
         tx_id = tx.get("transaction", "")
 
-        if msg.startswith(ARBIT_OPEN_PREFIX):
-            parts = msg[len(ARBIT_OPEN_PREFIX):].split(":")
-            if len(parts) >= 3 and parts[0] == escrow_id:
+        try:
+            parsed = parse_arbitration(msg)
+        except ProtocolError:
+            continue
+
+        if parsed.action == "OPEN":
+            if parsed.escrow_id == escrow_id:
                 open_requests.append({
-                    "escrow_id": parts[0],
-                    "claimant": parts[1],
-                    "reason_hash": parts[2],
+                    "escrow_id": parsed.escrow_id,
+                    "claimant": parsed.claimant,
+                    "reason_hash": parsed.reason_hash,
                     "timestamp": timestamp,
                     "tx_id": tx_id,
                     "from": sender,
                 })
 
-        elif msg.startswith(ARBIT_VOTE_PREFIX):
-            parts = msg[len(ARBIT_VOTE_PREFIX):].split(":")
-            if len(parts) >= 3 and parts[0] == escrow_id:
+        elif parsed.action == "VOTE":
+            if parsed.escrow_id == escrow_id:
                 votes.append({
-                    "escrow_id": parts[0],
-                    "decision": parts[1],
-                    "notes_hash": parts[2],
+                    "escrow_id": parsed.escrow_id,
+                    "decision": parsed.decision,
+                    "notes_hash": parsed.notes_hash,
                     "arbitrator": sender,
                     "timestamp": timestamp,
                     "tx_id": tx_id,

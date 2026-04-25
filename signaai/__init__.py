@@ -12,6 +12,7 @@ Layers:
   signaai.escrow    — Phase 1 practical escrow (on-chain audit trail)
   signaai.at_escrow — Phase 2 trustless AT escrow (no operator needed)
   signaai.arbitration — dispute/open-vote records for escrow flows
+  signaai.protocol  — parse/build compact on-chain protocol messages
 
 Quick start:
   import signaai
@@ -27,7 +28,7 @@ Environment:
 """
 
 import os
-from . import wallet, identity, verify, escrow, at_escrow, arbitration
+from . import wallet, identity, verify, escrow, at_escrow, arbitration, protocol
 from .api import get_api, signa, nqt, ok
 
 __version__ = "0.1.0"

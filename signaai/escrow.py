@@ -31,9 +31,18 @@ import hashlib
 import secrets
 import time
 sys.path.insert(0, os.path.dirname(__file__))
-from .api import get_api, signa, nqt, ts, FEE_MESSAGE, FEE_STANDARD, ok
-from .wallet import get_my_address, send_signa, get_transactions
+from .api import get_api, nqt, ts, FEE_MESSAGE, ok
+from .wallet import get_my_address, send_signa
 from .verify import hash_content, publish_proof
+from .protocol import (
+    build_escrow_create,
+    build_escrow_fund,
+    build_escrow_submit,
+    build_escrow_release,
+    build_escrow_refund,
+    parse_escrow,
+    ProtocolError,
+)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 ESCROW_PREFIX = "ESCROW:"
@@ -103,9 +112,14 @@ def create_escrow(payer_passphrase, worker_address, amount_signa=None,
         return None, "Amount must be greater than zero"
 
     # Build on-chain record message
-    message = (f"{ESCROW_PREFIX}CREATE:{escrow_id}:"
-               f"{worker_address}:{amount_nqt}:{task_hash}:{deadline_block}:"
-               f"{operator_address}")
+    message = build_escrow_create(
+        escrow_id,
+        worker_address,
+        amount_nqt,
+        task_hash,
+        deadline_block,
+        operator_address,
+    )
 
     # Step 1: Record escrow creation with the operator so status scans can reconstruct it.
     print(f"  Recording escrow on-chain...")
@@ -124,7 +138,7 @@ def create_escrow(payer_passphrase, worker_address, amount_signa=None,
     print(f"  Transferring {amount_signa} SIGNA to escrow...")
     time.sleep(2)  # brief pause between transactions
 
-    fund_message = f"{ESCROW_PREFIX}FUND:{escrow_id}"
+    fund_message = build_escrow_fund(escrow_id)
     fund_tx, err = send_signa(payer_passphrase, operator_address, amount_signa,
                               message=fund_message, network=network)
     if err:
@@ -180,7 +194,7 @@ def submit_result(worker_passphrase, escrow_id, result_content,
     time.sleep(2)
 
     # Submit to escrow record via sendMessage
-    message = f"{ESCROW_PREFIX}SUBMIT:{escrow_id}:{result_hash}"
+    message = build_escrow_submit(escrow_id, result_hash)
     print(f"  Submitting result to escrow...")
     submit_result_tx = api.post("sendMessage",
                                 secretPhrase=worker_passphrase,
@@ -239,7 +253,7 @@ def release_payment(operator_passphrase, escrow_id, expected_result_hash=None,
 
     print(f"  Releasing {amount} SIGNA to {worker}...")
 
-    release_message = f"{ESCROW_PREFIX}RELEASE:{escrow_id}:{worker}"
+    release_message = build_escrow_release(escrow_id, worker)
     tx_id, err = send_signa(operator_passphrase, worker, amount,
                             message=release_message, network=network)
     if err:
@@ -294,7 +308,7 @@ def refund_escrow(operator_passphrase, escrow_id, network=None):
         return None, "Could not determine payer address"
 
     print(f"  Refunding {amount} SIGNA to {payer}...")
-    refund_message = f"{ESCROW_PREFIX}REFUND:{escrow_id}:{payer}"
+    refund_message = build_escrow_refund(escrow_id, payer)
     tx_id, err = send_signa(operator_passphrase, payer, amount,
                             message=refund_message, network=network)
     if err:
@@ -377,43 +391,40 @@ def _parse_escrow_from_txs(escrow_id, transactions):
 
     for tx in transactions:
         msg = tx.get("attachment", {}).get("message", "")
-        if not msg.startswith(ESCROW_PREFIX):
+        try:
+            parsed = parse_escrow(msg)
+        except ProtocolError:
+            continue
+        if parsed.escrow_id != escrow_id:
             continue
 
-        parts = msg[len(ESCROW_PREFIX):].split(":")
-        action = parts[0] if parts else ""
-        payload = parts[2:] if len(parts) > 2 and parts[1].startswith("v") else parts[1:]
-        if not payload or payload[0] != escrow_id:
-            continue
-
-        if action == "CREATE" and len(payload) >= 5:
+        if parsed.action == "CREATE":
             # Always extract base data from CREATE regardless of rank
-            amount_nqt = int(payload[2]) if payload[2].isdigit() else 0
             escrow.update({
                 "payer": tx.get("senderRS"),
-                "worker": payload[1],
-                "amount_nqt": amount_nqt,
-                "amount_signa": amount_nqt / 100_000_000,
-                "task_hash": payload[3],
-                "deadline_block": int(payload[4]) if payload[4].isdigit() else 0,
-                "operator": payload[5] if len(payload) > 5 else tx.get("recipientRS"),
+                "worker": parsed.worker,
+                "amount_nqt": parsed.amount_nqt,
+                "amount_signa": parsed.amount_nqt / 100_000_000,
+                "task_hash": parsed.task_hash,
+                "deadline_block": parsed.deadline_block,
+                "operator": parsed.operator or tx.get("recipientRS"),
                 "create_tx": tx.get("transaction"),
                 "created_at": ts(tx.get("timestamp")),
             })
             if STATE_RANK[STATE_CREATED] > best_rank:
                 escrow["state"] = STATE_CREATED
                 best_rank = STATE_RANK[STATE_CREATED]
-        elif action == "SUBMIT" and len(payload) >= 2:
+        elif parsed.action == "SUBMIT":
             if STATE_RANK[STATE_SUBMITTED] > best_rank:
                 escrow.update({
                     "state": STATE_SUBMITTED,
-                    "submitted_hash": payload[1],
+                    "submitted_hash": parsed.result_hash,
                     "submit_tx": tx.get("transaction"),
                     "submitted_at": ts(tx.get("timestamp")),
                     "submitted_by": tx.get("senderRS"),
                 })
                 best_rank = STATE_RANK[STATE_SUBMITTED]
-        elif action == "RELEASE":
+        elif parsed.action == "RELEASE":
             if STATE_RANK[STATE_RELEASED] > best_rank:
                 escrow.update({
                     "state": STATE_RELEASED,
@@ -421,7 +432,7 @@ def _parse_escrow_from_txs(escrow_id, transactions):
                     "released_at": ts(tx.get("timestamp")),
                 })
                 best_rank = STATE_RANK[STATE_RELEASED]
-        elif action == "REFUND":
+        elif parsed.action == "REFUND":
             if STATE_RANK[STATE_REFUNDED] > best_rank:
                 escrow.update({
                     "state": STATE_REFUNDED,

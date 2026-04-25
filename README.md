@@ -163,6 +163,32 @@ signaai-verify --network mainnet check "output text" --tx TX_ID
 
 ---
 
+### Protocol messages (network-free building blocks)
+
+Parse and build compact on-chain messages without making any network calls.
+This is useful for indexers, dashboards, OpenClaw skills, and custom agent
+runtimes.
+
+```python
+from signaai import protocol
+
+msg = protocol.build_escrow_submit("escrow-abc", "result_hash")
+parsed = protocol.parse_message(msg)
+
+assert parsed.kind == "escrow"
+assert parsed.action == "SUBMIT"
+assert parsed.escrow_id == "escrow-abc"
+```
+
+Supported message families:
+
+- `SIGPROOF:v1:...`
+- `ESCROW:CREATE|FUND|SUBMIT|RELEASE|REFUND|ASSIGN:...`
+- `TASK_COMPLETE:...`
+- `ARBIT_OPEN|ARBIT_VOTE|ARBIT_CLOSE:...`
+
+---
+
 ### Layer 4 — Escrow (Phase 1: operator-mediated)
 
 On-chain audit trail for agent task payments. An operator (trusted third party) releases or refunds.
@@ -302,6 +328,26 @@ The contract runs entirely on-chain. No API key, no server, no operator.
 
 ---
 
+## Examples
+
+Small runnable examples live in `examples/`:
+
+```bash
+python examples/register_agent.py my-agent --capabilities research,summarization
+python examples/stamp_output.py "output text" --label task-001
+python examples/pay_agent.py S-RECIPIENT 1.0 --message "thanks"
+python examples/escrow_task.py S-WORKER 1.0 "summarize this file"
+python examples/parse_protocol_message.py "ESCROW:SUBMIT:escrow-1:hash"
+python examples/mk_hires_sieka.py "research Signum AT use cases" --sieka-address S-SIEKA
+```
+
+Most examples read `SIGNAAI_PASSPHRASE`, `SIGNUM_NETWORK`, and
+`SIGNAAI_ESCROW_OPERATOR` from the environment. `mk_hires_sieka.py` is a
+dogfooding scenario only; MK and Sieka are examples, not special identities in
+the SDK.
+
+---
+
 ## Security Notes
 
 - Prefer testnet until your agent workflow is fully rehearsed.
@@ -341,8 +387,10 @@ signaai/
 ├── wallet.py       — SIGNA send/receive/history
 ├── identity.py     — Agent registry, reputation scoring
 ├── verify.py       — Output stamping and verification
+├── protocol.py     — Parse/build on-chain SignaAI messages
 ├── escrow.py       — Phase 1 operator-mediated escrow
 ├── at_escrow.py    — Phase 2 trustless AT smart contract escrow
+├── arbitration.py  — Dispute records and arbitrator decisions
 └── contracts/
     └── signaai_escrow.smart   — AT bytecode source
 ```

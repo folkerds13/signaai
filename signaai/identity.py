@@ -19,8 +19,13 @@ Usage:
 import sys
 import os
 import json
-from .api import get_api, signa, ts, fmt_address, FEE_ALIAS, FEE_MESSAGE, ok
-from .wallet import get_my_address, get_transactions
+from .api import get_api, signa, ts, FEE_ALIAS, FEE_MESSAGE, ok
+from .wallet import get_my_address
+from .protocol import (
+    build_task_complete,
+    parse_task_complete,
+    ProtocolError,
+)
 
 
 # ── Registry ─────────────────────────────────────────────────────────────────
@@ -29,7 +34,6 @@ ALIAS_PREFIX = ""
 
 # On-chain reputation messages follow a structured format:
 # TASK_COMPLETE:<task_id>:<result_hash>:<rating_1_to_5>
-TASK_COMPLETE_PREFIX = "TASK_COMPLETE:"
 
 
 def register_agent(passphrase, agent_name, capabilities=None, version="1.0",
@@ -136,24 +140,20 @@ def get_agent_profile(address, network=None):
 
     for tx in (all_txs.get("transactions") or []):
         msg = tx.get("attachment", {}).get("message", "")
-        if msg.startswith(TASK_COMPLETE_PREFIX):
-            parts = msg[len(TASK_COMPLETE_PREFIX):].split(":")
-            if len(parts) >= 3:
-                task_id, result_hash = parts[0], parts[1]
-                try:
-                    rating = int(parts[2])
-                    total_rating += rating
-                    rating_count += 1
-                except:
-                    rating = None
-
-                tasks_completed.append({
-                    "task_id": task_id,
-                    "result_hash": result_hash,
-                    "rating": rating,
-                    "timestamp": ts(tx.get("timestamp")),
-                    "tx_id": tx.get("transaction"),
-                })
+        try:
+            completed = parse_task_complete(msg)
+        except ProtocolError:
+            continue
+        rating = completed.rating
+        total_rating += rating
+        rating_count += 1
+        tasks_completed.append({
+            "task_id": completed.task_id,
+            "result_hash": completed.result_hash,
+            "rating": rating,
+            "timestamp": ts(tx.get("timestamp")),
+            "tx_id": tx.get("transaction"),
+        })
 
     avg_rating = (total_rating / rating_count) if rating_count > 0 else None
 
@@ -189,15 +189,15 @@ def record_task_completion(passphrase, task_id, result_hash, rating=5, network=N
     result_hash: SHA-256 hash of the delivered result (from verify.py)
     rating:      1-5 self-reported or third-party rating
     """
-    if rating < 1 or rating > 5:
-        return None, "Rating must be between 1 and 5"
-
     api = get_api(network)
     address, err = get_my_address(passphrase, network)
     if err:
         return None, err
 
-    message = f"{TASK_COMPLETE_PREFIX}{task_id}:{result_hash}:{rating}"
+    try:
+        message = build_task_complete(task_id, result_hash, rating)
+    except ProtocolError as exc:
+        return None, str(exc)
 
     result = api.post("sendMessage",
                       secretPhrase=passphrase,
