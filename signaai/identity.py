@@ -19,6 +19,7 @@ Usage:
 import sys
 import os
 import json
+import hashlib
 from .api import get_api, signa, ts, FEE_ALIAS, FEE_MESSAGE, ok
 from .wallet import get_my_address
 from .protocol import (
@@ -50,7 +51,8 @@ def register_agent(passphrase, agent_name, capabilities=None, version="1.0",
     if err:
         return None, f"Could not derive address: {err}"
 
-    alias = f"{ALIAS_PREFIX}{agent_name.lower().replace(' ', '').replace('-', '').replace('_', '')}"
+    _slug = agent_name.lower().replace(' ', '').replace('-', '').replace('_', '')
+    alias = f"{ALIAS_PREFIX}{_slug}-{hashlib.sha256(_slug.encode()).hexdigest()[:8]}"
 
     metadata = {
         "type": "ai-agent",
@@ -88,7 +90,8 @@ def lookup_agent(agent_name, network=None):
     Returns address and metadata if found.
     """
     api = get_api(network)
-    alias = f"{ALIAS_PREFIX}{agent_name.lower().replace(' ', '').replace('-', '').replace('_', '')}"
+    _slug = agent_name.lower().replace(' ', '').replace('-', '').replace('_', '')
+    alias = f"{ALIAS_PREFIX}{_slug}-{hashlib.sha256(_slug.encode()).hexdigest()[:8]}"
 
     result = api.get("getAlias", aliasName=alias)
     if not ok(result):

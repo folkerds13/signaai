@@ -11,9 +11,10 @@ from decimal import Decimal, InvalidOperation, ROUND_DOWN
 
 # ── Constants ────────────────────────────────────────────────────────────────
 NQT = 100_000_000          # 1 SIGNA = 100,000,000 NQT (Nano-Quant)
-FEE_STANDARD  = 735_000     # 0.00735 SIGNA — standard transaction fee
-FEE_MESSAGE   = 10_000_000  # 0.1 SIGNA — message transactions (node minimum)
+FEE_STANDARD  = 2_000_000   # 0.02 SIGNA — standard transaction fee
+FEE_MESSAGE   = 5_000_000   # 0.05 SIGNA — message transactions (node minimum)
 FEE_ALIAS     = 20_000_000  # 0.2 SIGNA — alias registration fee
+FEE_AT        = 2_000_000   # 0.02 SIGNA — AT (smart contract) transactions
 DEADLINE      = 1440       # minutes — max transaction validity window
 
 NODES = {
