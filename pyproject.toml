@@ -26,12 +26,13 @@ classifiers = [
 dependencies = []
 
 [project.scripts]
-signaai-wallet   = "signaai.wallet:main"
-signaai-identity = "signaai.identity:main"
-signaai-verify   = "signaai.verify:main"
-signaai-escrow   = "signaai.escrow:main"
-signaai-at       = "signaai.at_escrow:main"
+signaai-wallet    = "signaai.wallet:main"
+signaai-identity  = "signaai.identity:main"
+signaai-verify    = "signaai.verify:main"
+signaai-escrow    = "signaai.escrow:main"
+signaai-at        = "signaai.at_escrow:main"
 signaai-arbitrate = "signaai.arbitration:main"
+signaai-listen    = "signaai.listener:main"
 
 [project.urls]
 Homepage = "https://signaai.io"

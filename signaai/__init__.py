@@ -28,8 +28,9 @@ Environment:
 """
 
 import os
-from . import wallet, identity, verify, escrow, at_escrow, arbitration, protocol
+from . import wallet, identity, verify, escrow, at_escrow, arbitration, protocol, listener
 from .api import get_api, signa, nqt, ok
+from .listener import SignaAIListener, TaskEvent, ResultEvent, ReleaseEvent, ProofEvent
 
 __version__ = "0.1.0"
 __author__  = "SignaAI"
