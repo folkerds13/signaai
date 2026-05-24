@@ -74,7 +74,38 @@ class SignumAPI:
     def post(self, request_type, **params):
         params["requestType"] = request_type
         params["deadline"] = DEADLINE
+        if "secretPhrase" in params:
+            return self._sign_and_broadcast(request_type, params)
         return self._call(params, "POST")
+
+    def _sign_and_broadcast(self, request_type, params):
+        """Sign locally and broadcast — passphrase never leaves this machine."""
+        from .crypto import generate_sign_keys, generate_signature, generate_signed_transaction_bytes
+
+        passphrase = params.pop("secretPhrase")
+        keys = generate_sign_keys(passphrase)
+        params["publicKey"] = keys["publicKey"]
+
+        # Get unsigned transaction bytes from node
+        unsigned = self._call(params, "POST")
+        if not ok(unsigned):
+            return unsigned
+        unsigned_hex = unsigned.get("unsignedTransactionBytes")
+        if not unsigned_hex:
+            return {"error": "Node did not return unsignedTransactionBytes"}
+
+        # Sign locally
+        signature  = generate_signature(unsigned_hex, keys["signPrivateKey"])
+        signed_hex = generate_signed_transaction_bytes(unsigned_hex, signature)
+
+        # Broadcast signed bytes
+        result = self._call({"requestType": "broadcastTransaction",
+                              "transactionBytes": signed_hex}, "POST")
+        if ok(result):
+            # Merge useful fields from the unsigned response
+            result.setdefault("transaction", unsigned.get("transaction"))
+            result.setdefault("fullHash",    unsigned.get("fullHash"))
+        return result
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 def signa(nqt):
