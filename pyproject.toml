@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "signaai"
-version = "0.1.0"
+version = "0.3.0"
 description = "AI agent infrastructure on Signum blockchain — payments, identity, verifiable outputs, and trustless escrow"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -13,7 +13,6 @@ keywords = ["signum", "blockchain", "ai-agents", "payments", "escrow", "smart-co
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Topic :: Software Development :: Libraries",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
@@ -33,6 +32,8 @@ signaai-escrow    = "signaai.escrow:main"
 signaai-at        = "signaai.at_escrow:main"
 signaai-arbitrate = "signaai.arbitration:main"
 signaai-listen    = "signaai.listener:main"
+signaai-events    = "signaai.events:main"
+signaai-board     = "signaai.board:main"
 
 [project.urls]
 Homepage = "https://signaai.io"

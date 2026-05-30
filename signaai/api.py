@@ -16,6 +16,7 @@ FEE_MESSAGE   = 5_000_000   # 0.05 SIGNA — message transactions (node minimum)
 FEE_ALIAS     = 20_000_000  # 0.2 SIGNA — alias registration fee
 FEE_AT        = 2_000_000   # 0.02 SIGNA — AT (smart contract) transactions
 DEADLINE      = 1440       # minutes — max transaction validity window
+EXPLORER_URL  = "https://explorer.signum.network"
 
 NODES = {
     "mainnet": [
@@ -142,6 +143,12 @@ def fmt_address(addr):
     if addr and not str(addr).startswith("SIGNA-"):
         return f"SIGNA-{addr}"
     return addr
+
+def fee_message(message=""):
+    """Dynamic message fee: 0.05 SIGNA base + 0.01 per 1KB over the first."""
+    msg_bytes = len(message.encode("utf-8")) if message else 0
+    chunks = max(1, -(-msg_bytes // 1024))
+    return max(FEE_MESSAGE, chunks * 1_000_000)
 
 def ok(result):
     """Check if API result is successful."""

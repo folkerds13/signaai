@@ -10,7 +10,9 @@ from dataclasses import dataclass
 
 PROOF_PREFIX = "SIGPROOF:v1:"
 ESCROW_PREFIX = "ESCROW:"
+TASK_PREFIX = "TASK:"
 TASK_COMPLETE_PREFIX = "TASK_COMPLETE:"
+TASK_RATING_PREFIX = "TASK_RATING:"
 ARBIT_OPEN_PREFIX = "ARBIT_OPEN:"
 ARBIT_VOTE_PREFIX = "ARBIT_VOTE:"
 ARBIT_CLOSE_PREFIX = "ARBIT_CLOSE:"
@@ -44,6 +46,7 @@ class EscrowMessage:
     deadline_block: int = 0
     operator: str = ""
     result_hash: str = ""
+    proof_tx: str = ""
     participant: str = ""
     task_description: str = ""
 
@@ -66,6 +69,20 @@ class TaskComplete:
 
 
 @dataclass(frozen=True)
+class TaskRating:
+    escrow_id: str
+    worker: str
+    result_hash: str
+    rating: int
+    version: str = "v1"
+
+    kind = "task_rating"
+
+    def to_message(self):
+        return build_task_rating(self.escrow_id, self.worker, self.result_hash, self.rating)
+
+
+@dataclass(frozen=True)
 class ArbitrationMessage:
     action: str
     escrow_id: str
@@ -79,6 +96,26 @@ class ArbitrationMessage:
 
     def to_message(self):
         return build_arbitration_message(self)
+
+
+@dataclass(frozen=True)
+class TaskMessage:
+    """A TASK board protocol message. action: OPEN | CLAIM | ACCEPT | CANCEL"""
+    action: str
+    task_id: str
+    version: str = "v1"
+    payer_address: str = ""
+    capability_tag: str = ""
+    amount_nqt: int = 0
+    deadline_block: int = 0
+    task_hash: str = ""
+    worker_address: str = ""
+    task_summary: str = ""
+
+    kind = "task"
+
+    def to_message(self):
+        return build_task_message(self)
 
 
 @dataclass(frozen=True)
@@ -104,6 +141,10 @@ def parse_message(message, strict=False):
         return parse_escrow(message)
     if message.startswith(TASK_COMPLETE_PREFIX):
         return parse_task_complete(message)
+    if message.startswith(TASK_RATING_PREFIX):
+        return parse_task_rating(message)
+    if message.startswith(TASK_PREFIX):
+        return parse_task(message)
     if (message.startswith(ARBIT_OPEN_PREFIX) or
             message.startswith(ARBIT_VOTE_PREFIX) or
             message.startswith(ARBIT_CLOSE_PREFIX)):
@@ -131,8 +172,10 @@ def parse_sigproof(message):
 
 
 def build_escrow_create(escrow_id, worker, amount_nqt, task_hash,
-                        deadline_block, operator=""):
+                        deadline_block, operator="", task_description=""):
     msg = f"{ESCROW_PREFIX}CREATE:{escrow_id}:{worker}:{int(amount_nqt)}:{task_hash}:{int(deadline_block)}"
+    if task_description:
+        return f"{msg}:{operator}:{task_description}"
     return f"{msg}:{operator}" if operator else msg
 
 
@@ -140,8 +183,9 @@ def build_escrow_fund(escrow_id):
     return f"{ESCROW_PREFIX}FUND:{escrow_id}"
 
 
-def build_escrow_submit(escrow_id, result_hash):
-    return f"{ESCROW_PREFIX}SUBMIT:{escrow_id}:{result_hash}"
+def build_escrow_submit(escrow_id, result_hash, proof_tx=""):
+    msg = f"{ESCROW_PREFIX}SUBMIT:{escrow_id}:{result_hash}"
+    return f"{msg}:{proof_tx}" if proof_tx else msg
 
 
 def build_escrow_release(escrow_id, worker):
@@ -164,12 +208,12 @@ def build_escrow_message(msg):
     if action == "CREATE":
         return build_escrow_create(
             msg.escrow_id, msg.worker, msg.amount_nqt, msg.task_hash,
-            msg.deadline_block, msg.operator
+            msg.deadline_block, msg.operator, msg.task_description
         )
     if action == "FUND":
         return build_escrow_fund(msg.escrow_id)
     if action == "SUBMIT":
-        return build_escrow_submit(msg.escrow_id, msg.result_hash)
+        return build_escrow_submit(msg.escrow_id, msg.result_hash, msg.proof_tx)
     if action == "RELEASE":
         return build_escrow_release(msg.escrow_id, msg.worker or msg.participant)
     if action == "REFUND":
@@ -208,6 +252,7 @@ def parse_escrow(message):
             task_hash=payload[3],
             deadline_block=_int_or_zero(payload[4]),
             operator=payload[5] if len(payload) > 5 else "",
+            task_description=":".join(payload[6:]) if len(payload) > 6 else "",
         )
     if action == "FUND":
         return EscrowMessage(action=action, escrow_id=escrow_id, version=version)
@@ -219,6 +264,7 @@ def parse_escrow(message):
             escrow_id=escrow_id,
             version=version,
             result_hash=payload[1],
+            proof_tx=payload[2] if len(payload) > 2 else "",
         )
     if action == "RELEASE":
         return EscrowMessage(
@@ -273,6 +319,37 @@ def parse_task_complete(message):
     return TaskComplete(
         task_id=parts[0],
         result_hash=parts[1],
+        rating=rating,
+    )
+
+
+def build_task_rating(escrow_id, worker, result_hash, rating):
+    try:
+        rating = int(rating)
+    except (TypeError, ValueError) as exc:
+        raise ProtocolError("Rating must be an integer") from exc
+    if rating < 1 or rating > 5:
+        raise ProtocolError("Rating must be between 1 and 5")
+    return f"{TASK_RATING_PREFIX}v1:{escrow_id}:{worker}:{result_hash}:{rating}"
+
+
+def parse_task_rating(message):
+    if not message.startswith(TASK_RATING_PREFIX):
+        raise ProtocolError("Not a TASK_RATING message")
+    parts = message[len(TASK_RATING_PREFIX):].split(":")
+    if len(parts) < 5 or parts[0] != "v1":
+        raise ProtocolError("Malformed TASK_RATING message")
+    try:
+        rating = int(parts[4])
+    except ValueError as exc:
+        raise ProtocolError("Rating must be an integer") from exc
+    if rating < 1 or rating > 5:
+        raise ProtocolError("Rating must be between 1 and 5")
+    return TaskRating(
+        version=parts[0],
+        escrow_id=parts[1],
+        worker=parts[2],
+        result_hash=parts[3],
         rating=rating,
     )
 
@@ -345,3 +422,93 @@ def _int_or_zero(value):
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+# ── TASK board protocol ───────────────────────────────────────────────────────
+
+def build_task_open(task_id, payer_address, capability_tag,
+                    amount_nqt, deadline_block, task_hash,
+                    version="v1", task_summary=""):
+    """TASK:OPEN:v1:<task_id>:<payer>:<capability>:<amount_nqt>:<deadline_block>:<task_hash>[:<summary>]"""
+    cap = (capability_tag or "").replace(":", "-")
+    base = (f"{TASK_PREFIX}OPEN:{version}:{task_id}:{payer_address}"
+            f":{cap}:{int(amount_nqt)}:{int(deadline_block)}:{task_hash}")
+    if task_summary:
+        return f"{base}:{sanitize_label(task_summary, 200)}"
+    return base
+
+
+def build_task_claim(task_id, worker_address, version="v1"):
+    """TASK:CLAIM:v1:<task_id>:<worker_address>"""
+    return f"{TASK_PREFIX}CLAIM:{version}:{task_id}:{worker_address}"
+
+
+def build_task_accept(task_id, worker_address, version="v1"):
+    """TASK:ACCEPT:v1:<task_id>:<worker_address>"""
+    return f"{TASK_PREFIX}ACCEPT:{version}:{task_id}:{worker_address}"
+
+
+def build_task_cancel(task_id, version="v1"):
+    """TASK:CANCEL:v1:<task_id>"""
+    return f"{TASK_PREFIX}CANCEL:{version}:{task_id}"
+
+
+def build_task_message(msg):
+    action = msg.action.upper()
+    if action == "OPEN":
+        return build_task_open(msg.task_id, msg.payer_address, msg.capability_tag,
+                               msg.amount_nqt, msg.deadline_block, msg.task_hash,
+                               msg.version, msg.task_summary)
+    if action == "CLAIM":
+        return build_task_claim(msg.task_id, msg.worker_address, msg.version)
+    if action == "ACCEPT":
+        return build_task_accept(msg.task_id, msg.worker_address, msg.version)
+    if action == "CANCEL":
+        return build_task_cancel(msg.task_id, msg.version)
+    raise ProtocolError(f"Unsupported task action: {action}")
+
+
+def parse_task(message):
+    """Parse a TASK: board protocol message."""
+    if not message.startswith(TASK_PREFIX):
+        raise ProtocolError("Not a TASK message")
+    parts = message[len(TASK_PREFIX):].split(":")
+    if len(parts) < 2:
+        raise ProtocolError("Malformed TASK message")
+
+    action = parts[0].upper()
+    version = parts[1] if len(parts) > 2 and parts[1].startswith("v") else "v1"
+    payload = parts[2:] if version else parts[1:]
+
+    if not payload:
+        raise ProtocolError("TASK message missing task_id")
+
+    task_id = payload[0]
+
+    if action == "OPEN":
+        if len(payload) < 6:
+            raise ProtocolError("Malformed TASK:OPEN message")
+        return TaskMessage(
+            action=action,
+            task_id=task_id,
+            version=version,
+            payer_address=payload[1],
+            capability_tag=payload[2],
+            amount_nqt=_int_or_zero(payload[3]),
+            deadline_block=_int_or_zero(payload[4]),
+            task_hash=payload[5],
+            task_summary=payload[6] if len(payload) > 6 else "",
+        )
+    if action in ("CLAIM", "ACCEPT"):
+        if len(payload) < 2:
+            raise ProtocolError(f"Malformed TASK:{action} message")
+        return TaskMessage(
+            action=action,
+            task_id=task_id,
+            version=version,
+            worker_address=payload[1],
+        )
+    if action == "CANCEL":
+        return TaskMessage(action=action, task_id=task_id, version=version)
+
+    raise ProtocolError(f"Unsupported task action: {action}")

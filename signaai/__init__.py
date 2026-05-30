@@ -28,12 +28,13 @@ Environment:
 """
 
 import os
-from . import wallet, identity, verify, escrow, at_escrow, arbitration, protocol, listener, crypto
+from . import wallet, identity, verify, escrow, at_escrow, arbitration, protocol, listener, crypto, events, board
 from .api import get_api, signa, nqt, ok
-from .listener import SignaAIListener, TaskEvent, ResultEvent, ReleaseEvent, ProofEvent
+from .listener import SignaAIListener, TaskEvent, ResultEvent, ReleaseEvent, ProofEvent, RatingEvent
+from .protocol import TaskMessage
 from .crypto import generate_sign_keys, generate_signature, verify_signature
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"
 __author__  = "SignaAI"
 
 
