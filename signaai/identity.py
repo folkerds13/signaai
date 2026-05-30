@@ -21,10 +21,12 @@ import os
 import json
 import hashlib
 from .api import get_api, signa, ts, FEE_ALIAS, FEE_MESSAGE, ok
+from .cli_secrets import resolve_passphrase
 from .wallet import get_my_address
 from .protocol import (
     build_task_complete,
     parse_task_complete,
+    parse_task_rating,
     ProtocolError,
 )
 
@@ -143,20 +145,44 @@ def get_agent_profile(address, network=None):
 
     for tx in (all_txs.get("transactions") or []):
         msg = tx.get("attachment", {}).get("message", "")
-        try:
-            completed = parse_task_complete(msg)
-        except ProtocolError:
-            continue
-        rating = completed.rating
-        total_rating += rating
-        rating_count += 1
-        tasks_completed.append({
-            "task_id": completed.task_id,
-            "result_hash": completed.result_hash,
-            "rating": rating,
-            "timestamp": ts(tx.get("timestamp")),
-            "tx_id": tx.get("transaction"),
-        })
+        sender = tx.get("senderRS") or tx.get("sender", "")
+        acct_rs = account.get("accountRS", address)
+
+        # TASK_COMPLETE: worker sends to self (self-reported)
+        if sender == acct_rs or sender == address:
+            try:
+                completed = parse_task_complete(msg)
+                total_rating += completed.rating
+                rating_count += 1
+                tasks_completed.append({
+                    "task_id": completed.task_id,
+                    "result_hash": completed.result_hash,
+                    "rating": completed.rating,
+                    "source": "self",
+                    "timestamp": ts(tx.get("timestamp")),
+                    "tx_id": tx.get("transaction"),
+                })
+                continue
+            except ProtocolError:
+                pass
+
+        # TASK_RATING: payer sends to worker (third-party rating — more credible)
+        if sender != acct_rs and sender != address:
+            try:
+                rated = parse_task_rating(msg)
+                if rated.worker == acct_rs or rated.worker == address:
+                    total_rating += rated.rating
+                    rating_count += 1
+                    tasks_completed.append({
+                        "task_id": rated.escrow_id,
+                        "result_hash": rated.result_hash,
+                        "rating": rated.rating,
+                        "source": "payer",
+                        "timestamp": ts(tx.get("timestamp")),
+                        "tx_id": tx.get("transaction"),
+                    })
+            except ProtocolError:
+                pass
 
     avg_rating = (total_rating / rating_count) if rating_count > 0 else None
 
@@ -292,7 +318,8 @@ def main():
     sub = parser.add_subparsers(dest="cmd")
 
     p = sub.add_parser("register", help="Register a new agent identity")
-    p.add_argument("passphrase")
+    p.add_argument("passphrase", metavar="PASSPHRASE",
+                   help="passphrase, @worker, env:VAR, @file:PATH, or - to prompt")
     p.add_argument("agent_name")
     p.add_argument("--capabilities", default="", help="Comma-separated list")
     p.add_argument("--description", default="")
@@ -309,7 +336,8 @@ def main():
     p.add_argument("address")
 
     p = sub.add_parser("record", help="Record a completed task (builds reputation)")
-    p.add_argument("passphrase")
+    p.add_argument("passphrase", metavar="PASSPHRASE",
+                   help="passphrase, @worker, env:VAR, @file:PATH, or - to prompt")
     p.add_argument("task_id")
     p.add_argument("result_hash")
     p.add_argument("--rating", type=int, default=5)
@@ -326,7 +354,7 @@ def main():
     if args.cmd == "register":
         caps = [c.strip() for c in args.capabilities.split(",") if c.strip()]
         print(f"Registering agent '{args.agent_name}' on {args.network}...")
-        result, err = register_agent(args.passphrase, args.agent_name,
+        result, err = register_agent(resolve_passphrase(args.passphrase), args.agent_name,
                                      capabilities=caps,
                                      description=args.description,
                                      endpoint=args.endpoint,
@@ -377,7 +405,7 @@ def main():
             print(f"Reputation Score: {result['reputation_score']}/500")
 
     elif args.cmd == "record":
-        tx_id, err = record_task_completion(args.passphrase, args.task_id,
+        tx_id, err = record_task_completion(resolve_passphrase(args.passphrase), args.task_id,
                                             args.result_hash, args.rating,
                                             args.network)
         if err:

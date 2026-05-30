@@ -65,6 +65,26 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(parsed.decision, "RELEASE")
         self.assertEqual(parsed.to_message(), msg)
 
+    def test_task_rating_round_trip(self):
+        msg = protocol.build_task_rating("esc-1", "S-WORKER", "rhash", 4)
+        parsed = protocol.parse_message(msg)
+
+        self.assertEqual(msg, "TASK_RATING:v1:esc-1:S-WORKER:rhash:4")
+        self.assertEqual(parsed.kind, "task_rating")
+        self.assertEqual(parsed.escrow_id, "esc-1")
+        self.assertEqual(parsed.worker, "S-WORKER")
+        self.assertEqual(parsed.result_hash, "rhash")
+        self.assertEqual(parsed.rating, 4)
+        self.assertEqual(parsed.to_message(), msg)
+
+    def test_task_rating_validation(self):
+        with self.assertRaises(protocol.ProtocolError):
+            protocol.build_task_rating("e", "S-W", "h", 0)
+        with self.assertRaises(protocol.ProtocolError):
+            protocol.build_task_rating("e", "S-W", "h", 6)
+        with self.assertRaises(protocol.ProtocolError):
+            protocol.parse_message("TASK_RATING:v1:e:S-W:h:6")
+
     def test_unknown_message(self):
         parsed = protocol.parse_message("HELLO")
         self.assertEqual(parsed.kind, "unknown")

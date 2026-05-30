@@ -26,6 +26,7 @@ import json
 import hashlib
 sys.path.insert(0, os.path.dirname(__file__))
 from .api import get_api, ts, FEE_MESSAGE, ok
+from .cli_secrets import resolve_passphrase
 from .wallet import get_my_address
 from .protocol import build_sigproof, parse_sigproof, ProtocolError
 
@@ -224,7 +225,8 @@ def main():
     p.add_argument("--sources", default="", help="Comma-separated source URLs")
 
     p = sub.add_parser("publish", help="Publish a proof on-chain")
-    p.add_argument("passphrase")
+    p.add_argument("passphrase", metavar="PASSPHRASE",
+                   help="passphrase, @worker, env:VAR, @file:PATH, or - to prompt")
     p.add_argument("content_hash")
     p.add_argument("--sources-hash", default="")
     p.add_argument("--label", default="")
@@ -245,7 +247,8 @@ def main():
 
     # Convenience: hash + publish in one step
     p = sub.add_parser("stamp", help="Hash content and publish proof in one step")
-    p.add_argument("passphrase")
+    p.add_argument("passphrase", metavar="PASSPHRASE",
+                   help="passphrase, @worker, env:VAR, @file:PATH, or - to prompt")
     p.add_argument("content")
     p.add_argument("--sources", default="")
     p.add_argument("--label", default="")
@@ -263,7 +266,7 @@ def main():
             print(f"Sources ({len(sources)}): {', '.join(sources)}")
 
     elif args.cmd == "publish":
-        result, err = publish_proof(args.passphrase, args.content_hash,
+        result, err = publish_proof(resolve_passphrase(args.passphrase), args.content_hash,
                                     args.sources_hash, args.label, args.network)
         if err:
             print(f"Error: {err}")
@@ -278,7 +281,7 @@ def main():
         sources = [s.strip() for s in args.sources.split(",") if s.strip()]
         h = hash_content(args.content, sources)
         print(f"Content hash: {h['content_hash']}")
-        result, err = publish_proof(args.passphrase, h['content_hash'],
+        result, err = publish_proof(resolve_passphrase(args.passphrase), h['content_hash'],
                                     h['sources_hash'], args.label, args.network)
         if err:
             print(f"Error publishing: {err}")

@@ -87,6 +87,37 @@ class EscrowTests(unittest.TestCase):
                 self.assertIsNone(err)
                 self.assertEqual(result["tx_id"], "release-tx")
 
+    def test_release_with_rating_sends_task_rating(self):
+        status = {
+            "state": escrow.STATE_SUBMITTED,
+            "worker": "S-WORKER",
+            "amount_signa": 1.0,
+            "submitted_hash": "resulthash",
+        }
+        rating_tx_sent = []
+
+        def fake_post(request_type, **kwargs):
+            if request_type == "sendMessage":
+                rating_tx_sent.append(kwargs.get("message", ""))
+                return {"transaction": "rating-tx"}
+            return {}
+
+        with patch.object(escrow, "get_my_address", return_value=("S-OPERATOR", None)), \
+             patch.object(escrow, "get_escrow_status", return_value=(status, None)), \
+             patch.object(escrow, "send_signa", return_value=("release-tx", None)), \
+             patch.object(escrow.get_api("testnet"), "post", side_effect=fake_post):
+            with redirect_stdout(StringIO()):
+                result, err = escrow.release_payment(
+                    "operator secret", "abc123",
+                    expected_result_hash="resulthash",
+                    rating=4,
+                    network="testnet",
+                )
+            self.assertIsNone(err)
+            self.assertEqual(result["rating"], 4)
+            self.assertEqual(len(rating_tx_sent), 1)
+            self.assertIn("TASK_RATING:v1:abc123:S-WORKER:resulthash:4", rating_tx_sent[0])
+
 
 if __name__ == "__main__":
     unittest.main()

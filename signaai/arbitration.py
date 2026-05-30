@@ -26,6 +26,7 @@ import hashlib
 sys.path.insert(0, os.path.dirname(__file__))
 from .api import get_api, signa, ts, FEE_MESSAGE, ok
 from .wallet import get_my_address
+from .cli_secrets import resolve_passphrase
 from .protocol import build_arbit_open, build_arbit_vote, parse_arbitration, ProtocolError
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -267,14 +268,16 @@ def main():
 
     # open
     p = sub.add_parser("open", help="Open an arbitration request")
-    p.add_argument("passphrase", help="Claimant passphrase (payer or worker)")
+    p.add_argument("passphrase", metavar="PASSPHRASE",
+                   help="passphrase, @worker, env:VAR, @file:PATH, or - to prompt")
     p.add_argument("escrow_id", help="Escrow ID to dispute")
     p.add_argument("arbitrator_address", help="Arbitrator's Signum address")
     p.add_argument("reason", help="Reason for dispute")
 
     # vote
     p = sub.add_parser("vote", help="Arbitrator issues a decision")
-    p.add_argument("passphrase", help="Arbitrator passphrase")
+    p.add_argument("passphrase", metavar="PASSPHRASE",
+                   help="passphrase, @worker, env:VAR, @file:PATH, or - to prompt")
     p.add_argument("escrow_id", help="Escrow ID being arbitrated")
     p.add_argument("decision", choices=["RELEASE", "REFUND"],
                    help="RELEASE = pay worker, REFUND = return to payer")
@@ -287,7 +290,8 @@ def main():
 
     # register-arbitrator
     p = sub.add_parser("register-arbitrator", help="Register as a public arbitrator")
-    p.add_argument("passphrase")
+    p.add_argument("passphrase", metavar="PASSPHRASE",
+                   help="passphrase, @worker, env:VAR, @file:PATH, or - to prompt")
     p.add_argument("name")
     p.add_argument("--description", default="")
 
@@ -299,7 +303,7 @@ def main():
 
     if args.cmd == "open":
         result, err = open_arbitration(
-            args.passphrase, args.escrow_id,
+            resolve_passphrase(args.passphrase), args.escrow_id,
             args.arbitrator_address, args.reason, args.network
         )
         if err:
@@ -314,7 +318,7 @@ def main():
 
     elif args.cmd == "vote":
         result, err = vote_arbitration(
-            args.passphrase, args.escrow_id,
+            resolve_passphrase(args.passphrase), args.escrow_id,
             args.decision, args.notes, args.network
         )
         if err:
@@ -344,7 +348,7 @@ def main():
 
     elif args.cmd == "register-arbitrator":
         result, err = register_arbitrator(
-            args.passphrase, args.name, args.description, args.network
+            resolve_passphrase(args.passphrase), args.name, args.description, args.network
         )
         if err:
             print(f"Error: {err}")

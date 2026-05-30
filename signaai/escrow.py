@@ -34,12 +34,14 @@ sys.path.insert(0, os.path.dirname(__file__))
 from .api import get_api, nqt, ts, FEE_MESSAGE, ok
 from .wallet import get_my_address, send_signa
 from .verify import hash_content, publish_proof
+from .cli_secrets import resolve_passphrase
 from .protocol import (
     build_escrow_create,
     build_escrow_fund,
     build_escrow_submit,
     build_escrow_release,
     build_escrow_refund,
+    build_task_rating,
     parse_escrow,
     ProtocolError,
 )
@@ -217,7 +219,7 @@ def submit_result(worker_passphrase, escrow_id, result_content,
 
 
 def release_payment(operator_passphrase, escrow_id, expected_result_hash=None,
-                    approve=False, network=None):
+                    approve=False, network=None, rating=None):
     """
     Release escrow funds to worker after verifying result hash matches.
     Called by operator after confirming submission is valid.
@@ -259,12 +261,31 @@ def release_payment(operator_passphrase, escrow_id, expected_result_hash=None,
     if err:
         return None, f"Release failed: {err}"
 
+    rating_tx = None
+    if rating is not None:
+        try:
+            rating_message = build_task_rating(
+                escrow_id, worker, submitted_hash or "", rating
+            )
+            api = get_api(network)
+            r = api.post("sendMessage",
+                         secretPhrase=operator_passphrase,
+                         recipient=worker,
+                         message=rating_message,
+                         messageIsText="true",
+                         feeNQT=FEE_MESSAGE)
+            rating_tx = r.get("transaction")
+        except (ProtocolError, Exception):
+            pass  # rating is best-effort; don't fail the release
+
     return {
         "escrow_id": escrow_id,
         "state": STATE_RELEASED,
         "worker": worker,
         "amount_signa": amount,
         "tx_id": tx_id,
+        "rating": rating,
+        "rating_tx": rating_tx,
     }, None
 
 
@@ -453,7 +474,8 @@ def main():
     sub = parser.add_subparsers(dest="cmd")
 
     p = sub.add_parser("create", help="Create a new escrow")
-    p.add_argument("payer_passphrase")
+    p.add_argument("payer_passphrase", metavar="PASSPHRASE",
+                   help="passphrase, @worker, env:VAR, @file:PATH, or - to prompt")
     p.add_argument("worker_address")
     p.add_argument("amount", type=float, help="SIGNA amount")
     p.add_argument("task_description")
@@ -463,24 +485,38 @@ def main():
 
     # submit
     p = sub.add_parser("submit", help="Worker submits completed result")
-    p.add_argument("worker_passphrase")
+    p.add_argument("worker_passphrase", metavar="PASSPHRASE",
+                   help="passphrase, @worker, env:VAR, @file:PATH, or - to prompt")
     p.add_argument("escrow_id")
     p.add_argument("result_content")
     p.add_argument("--sources", default="")
 
     # release
     p = sub.add_parser("release", help="Release payment to worker")
-    p.add_argument("operator_passphrase")
+    p.add_argument("operator_passphrase", metavar="PASSPHRASE",
+                   help="passphrase, @worker, env:VAR, @file:PATH, or - to prompt")
     p.add_argument("escrow_id")
     p.add_argument("--expected-hash", default=None,
                    help="Expected submitted result hash")
     p.add_argument("--approve", action="store_true",
                    help="Release after off-chain/manual approval when no expected hash is available")
+    p.add_argument("--rating", type=int, choices=[1, 2, 3, 4, 5], default=None,
+                   help="Rate the worker 1-5 on-chain when releasing (builds reputation)")
 
     # refund
     p = sub.add_parser("refund", help="Refund payment to payer")
-    p.add_argument("operator_passphrase")
+    p.add_argument("operator_passphrase", metavar="PASSPHRASE",
+                   help="passphrase, @worker, env:VAR, @file:PATH, or - to prompt")
     p.add_argument("escrow_id")
+
+    # rate
+    p = sub.add_parser("rate", help="Rate a worker after a completed escrow (builds reputation)")
+    p.add_argument("payer_passphrase", metavar="PASSPHRASE",
+                   help="passphrase, @worker, env:VAR, @file:PATH, or - to prompt")
+    p.add_argument("escrow_id")
+    p.add_argument("worker_address")
+    p.add_argument("rating", type=int, choices=[1, 2, 3, 4, 5])
+    p.add_argument("--result-hash", default="", help="Hash of the delivered result (optional)")
 
     # status
     p = sub.add_parser("status", help="Check escrow status")
@@ -493,7 +529,7 @@ def main():
     if args.cmd == "create":
         print(f"Creating escrow on {args.network}...")
         result, err = create_escrow(
-            args.payer_passphrase, args.worker_address, args.amount,
+            resolve_passphrase(args.payer_passphrase), args.worker_address, args.amount,
             args.task_description, args.deadline_hours,
             operator_address=args.operator_address,
             network=args.network
@@ -517,7 +553,7 @@ def main():
         sources = [s.strip() for s in args.sources.split(",") if s.strip()]
         print(f"Submitting result for escrow {args.escrow_id}...")
         result, err = submit_result(
-            args.worker_passphrase, args.escrow_id,
+            resolve_passphrase(args.worker_passphrase), args.escrow_id,
             args.result_content, sources, args.network
         )
         if err:
@@ -532,10 +568,11 @@ def main():
     elif args.cmd == "release":
         print(f"Releasing escrow {args.escrow_id}...")
         result, err = release_payment(
-            args.operator_passphrase, args.escrow_id,
+            resolve_passphrase(args.operator_passphrase), args.escrow_id,
             expected_result_hash=args.expected_hash,
             approve=args.approve,
-            network=args.network
+            network=args.network,
+            rating=args.rating,
         )
         if err:
             print(f"Error: {err}")
@@ -544,11 +581,13 @@ def main():
             print(f"  Worker:   {result['worker']}")
             print(f"  Amount:   {result['amount_signa']} SIGNA")
             print(f"  TX:       {result['tx_id']}")
+            if result.get("rating"):
+                print(f"  Rating:   {result['rating']}/5 (TX: {result.get('rating_tx', 'pending')})")
 
     elif args.cmd == "refund":
         print(f"Refunding escrow {args.escrow_id}...")
         result, err = refund_escrow(
-            args.operator_passphrase, args.escrow_id, args.network
+            resolve_passphrase(args.operator_passphrase), args.escrow_id, args.network
         )
         if err:
             print(f"Error: {err}")
@@ -557,6 +596,31 @@ def main():
             print(f"  Payer:    {result['payer']}")
             print(f"  Amount:   {result['amount_signa']} SIGNA")
             print(f"  TX:       {result['tx_id']}")
+
+    elif args.cmd == "rate":
+        passphrase = resolve_passphrase(args.payer_passphrase)
+        try:
+            rating_message = build_task_rating(
+                args.escrow_id, args.worker_address, args.result_hash, args.rating
+            )
+        except Exception as exc:
+            print(f"Error: {exc}")
+        else:
+            api = get_api(args.network)
+            r = api.post("sendMessage",
+                         secretPhrase=passphrase,
+                         recipient=args.worker_address,
+                         message=rating_message,
+                         messageIsText="true",
+                         feeNQT=FEE_MESSAGE)
+            if not ok(r):
+                print(f"Error: {r.get('error', 'Failed to send rating')}")
+            else:
+                print(f"\n✓ Rating sent on-chain")
+                print(f"  Escrow:  {args.escrow_id}")
+                print(f"  Worker:  {args.worker_address}")
+                print(f"  Rating:  {args.rating}/5")
+                print(f"  TX:      {r.get('transaction')}")
 
     elif args.cmd == "status":
         result, err = get_escrow_status(args.escrow_id, args.address, args.network)

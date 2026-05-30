@@ -26,6 +26,7 @@ import secrets
 import math
 sys.path.insert(0, os.path.dirname(__file__))
 from .api import get_api, signa, nqt, FEE_STANDARD, FEE_MESSAGE, ok
+from .cli_secrets import resolve_passphrase
 from .wallet import get_my_address, send_signa
 
 # ── AT Bytecode (compiled from SignaAIEscrow.java via SmartJ) ─────────────────
@@ -278,14 +279,16 @@ def main():
 
     # deploy
     p = sub.add_parser("deploy", help="Deploy the escrow AT contract")
-    p.add_argument("payer_passphrase")
+    p.add_argument("payer_passphrase", metavar="PASSPHRASE",
+                   help="passphrase, @worker, env:VAR, @file:PATH, or - to prompt")
     p.add_argument("worker_address", help="Worker agent's Signum address")
     p.add_argument("deadline_minutes", type=int, help="Minutes until refund (e.g. 1440 = 24h)")
     p.add_argument("preimage_hex", help="32-byte hex preimage (from gen-preimage)")
 
     # submit
     p = sub.add_parser("submit", help="Worker submits preimage to claim payment")
-    p.add_argument("worker_passphrase")
+    p.add_argument("worker_passphrase", metavar="PASSPHRASE",
+                   help="passphrase, @worker, env:VAR, @file:PATH, or - to prompt")
     p.add_argument("at_address", help="AT contract address")
     p.add_argument("preimage_hex", help="The preimage revealed by payer")
 
@@ -307,7 +310,7 @@ def main():
     elif args.cmd == "deploy":
         print(f"Deploying SignaAI Escrow AT on {args.network}...")
         result, err = deploy_at(
-            args.payer_passphrase, args.worker_address,
+            resolve_passphrase(args.payer_passphrase), args.worker_address,
             args.deadline_minutes, args.preimage_hex, args.network
         )
         if err:
@@ -326,7 +329,7 @@ def main():
     elif args.cmd == "submit":
         print(f"Submitting preimage to AT {args.at_address}...")
         result, err = submit_preimage(
-            args.worker_passphrase, args.at_address,
+            resolve_passphrase(args.worker_passphrase), args.at_address,
             args.preimage_hex, args.network
         )
         if err:

@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
 from .api import get_api, ok
-from .protocol import parse_message, EscrowMessage, SigProof, ProtocolError
+from .protocol import parse_message, EscrowMessage, SigProof, TaskRating, ProtocolError
 
 
 # ── State directory ───────────────────────────────────────────────────────────
@@ -90,6 +90,19 @@ class ProofEvent:
 
 
 @dataclass
+class RatingEvent:
+    """Fired when a payer sends a TASK_RATING for completed work."""
+    escrow_id: str
+    worker_address: str
+    result_hash: str
+    rating: int
+    sender_address: str
+    tx_id: str
+    timestamp: int
+    raw_message: str = ""
+
+
+@dataclass
 class RawEvent:
     """Fired for every incoming transaction with a parseable SignaAI message."""
     parsed: object          # EscrowMessage, SigProof, etc.
@@ -134,11 +147,12 @@ class SignaAIListener:
         self.state_dir     = state_dir or _default_state_dir()
         self._log          = logger or self._default_log
 
-        self._on_task_assigned:  List[Callable] = []
+        self._on_task_assigned:   List[Callable] = []
         self._on_result_received: List[Callable] = []
         self._on_escrow_released: List[Callable] = []
-        self._on_proof_stamped:  List[Callable] = []
-        self._on_raw:            List[Callable] = []
+        self._on_proof_stamped:   List[Callable] = []
+        self._on_rating_received: List[Callable] = []
+        self._on_raw:             List[Callable] = []
 
         self._state = self._load_state()
 
@@ -163,6 +177,11 @@ class SignaAIListener:
     def on_proof_stamped(self, fn: Callable) -> Callable:
         """Register a handler for SIGPROOF messages. Called with a ProofEvent."""
         self._on_proof_stamped.append(fn)
+        return fn
+
+    def on_rating_received(self, fn: Callable) -> Callable:
+        """Register a handler for TASK_RATING events. Called with a RatingEvent."""
+        self._on_rating_received.append(fn)
         return fn
 
     def on_message(self, fn: Callable) -> Callable:
@@ -315,6 +334,21 @@ class SignaAIListener:
                 raw_message=raw,
             )
             for fn in self._on_proof_stamped:
+                self._call(fn, ev)
+                fired += 1
+
+        elif isinstance(parsed, TaskRating):
+            ev = RatingEvent(
+                escrow_id=parsed.escrow_id,
+                worker_address=parsed.worker,
+                result_hash=parsed.result_hash,
+                rating=parsed.rating,
+                sender_address=sender,
+                tx_id=tx_id,
+                timestamp=ts,
+                raw_message=raw,
+            )
+            for fn in self._on_rating_received:
                 self._call(fn, ev)
                 fired += 1
 
