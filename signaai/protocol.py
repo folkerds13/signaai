@@ -11,6 +11,7 @@ from dataclasses import dataclass
 PROOF_PREFIX = "SIGPROOF:v1:"
 ESCROW_PREFIX = "ESCROW:"
 TASK_COMPLETE_PREFIX = "TASK_COMPLETE:"
+TASK_RATING_PREFIX = "TASK_RATING:"
 ARBIT_OPEN_PREFIX = "ARBIT_OPEN:"
 ARBIT_VOTE_PREFIX = "ARBIT_VOTE:"
 ARBIT_CLOSE_PREFIX = "ARBIT_CLOSE:"
@@ -66,6 +67,24 @@ class TaskComplete:
 
 
 @dataclass(frozen=True)
+class TaskRating:
+    task_id: str
+    worker: str
+    result_hash: str
+    rating: int
+
+    kind = "task_rating"
+
+    def to_message(self):
+        return build_task_rating(
+            self.task_id,
+            self.worker,
+            self.result_hash,
+            self.rating,
+        )
+
+
+@dataclass(frozen=True)
 class ArbitrationMessage:
     action: str
     escrow_id: str
@@ -104,6 +123,8 @@ def parse_message(message, strict=False):
         return parse_escrow(message)
     if message.startswith(TASK_COMPLETE_PREFIX):
         return parse_task_complete(message)
+    if message.startswith(TASK_RATING_PREFIX):
+        return parse_task_rating(message)
     if (message.startswith(ARBIT_OPEN_PREFIX) or
             message.startswith(ARBIT_VOTE_PREFIX) or
             message.startswith(ARBIT_CLOSE_PREFIX)):
@@ -249,12 +270,7 @@ def parse_escrow(message):
 
 
 def build_task_complete(task_id, result_hash, rating):
-    try:
-        rating = int(rating)
-    except (TypeError, ValueError) as exc:
-        raise ProtocolError("Rating must be an integer") from exc
-    if rating < 1 or rating > 5:
-        raise ProtocolError("Rating must be between 1 and 5")
+    rating = _validate_rating(rating)
     return f"{TASK_COMPLETE_PREFIX}{task_id}:{result_hash}:{rating}"
 
 
@@ -264,16 +280,30 @@ def parse_task_complete(message):
     parts = message[len(TASK_COMPLETE_PREFIX):].split(":")
     if len(parts) < 3:
         raise ProtocolError("Malformed TASK_COMPLETE message")
-    try:
-        rating = int(parts[2])
-    except ValueError as exc:
-        raise ProtocolError("Rating must be an integer") from exc
-    if rating < 1 or rating > 5:
-        raise ProtocolError("Rating must be between 1 and 5")
     return TaskComplete(
         task_id=parts[0],
         result_hash=parts[1],
-        rating=rating,
+        rating=_validate_rating(parts[2]),
+    )
+
+
+def build_task_rating(task_id, worker, result_hash, rating):
+    """Build a counterparty-signed task rating message."""
+    rating = _validate_rating(rating)
+    return f"{TASK_RATING_PREFIX}{task_id}:{worker}:{result_hash}:{rating}"
+
+
+def parse_task_rating(message):
+    if not message.startswith(TASK_RATING_PREFIX):
+        raise ProtocolError("Not a TASK_RATING message")
+    parts = message[len(TASK_RATING_PREFIX):].split(":")
+    if len(parts) < 4:
+        raise ProtocolError("Malformed TASK_RATING message")
+    return TaskRating(
+        task_id=parts[0],
+        worker=parts[1],
+        result_hash=parts[2],
+        rating=_validate_rating(parts[3]),
     )
 
 
@@ -345,3 +375,13 @@ def _int_or_zero(value):
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def _validate_rating(rating):
+    try:
+        rating = int(rating)
+    except (TypeError, ValueError) as exc:
+        raise ProtocolError("Rating must be an integer") from exc
+    if rating < 1 or rating > 5:
+        raise ProtocolError("Rating must be between 1 and 5")
+    return rating

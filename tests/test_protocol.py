@@ -55,6 +55,21 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaises(protocol.ProtocolError):
             protocol.parse_message("TASK_COMPLETE:task-1:hash:6")
 
+    def test_task_rating_round_trip(self):
+        msg = protocol.build_task_rating("task-1", "S-WORKER", "hash", 4)
+        parsed = protocol.parse_message(msg)
+
+        self.assertEqual(msg, "TASK_RATING:task-1:S-WORKER:hash:4")
+        self.assertEqual(parsed.kind, "task_rating")
+        self.assertEqual(parsed.task_id, "task-1")
+        self.assertEqual(parsed.worker, "S-WORKER")
+        self.assertEqual(parsed.result_hash, "hash")
+        self.assertEqual(parsed.rating, 4)
+        self.assertEqual(parsed.to_message(), msg)
+
+        with self.assertRaises(protocol.ProtocolError):
+            protocol.build_task_rating("task-1", "S-WORKER", "hash", 0)
+
     def test_arbitration_round_trip(self):
         msg = protocol.build_arbit_vote("escrow-1", "release", "noteshash")
         parsed = protocol.parse_message(msg)

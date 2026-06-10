@@ -27,6 +27,7 @@ import math
 sys.path.insert(0, os.path.dirname(__file__))
 from .api import get_api, signa, nqt, FEE_STANDARD, FEE_MESSAGE, ok
 from .wallet import get_my_address, send_signa
+from .cli_secrets import resolve_passphrase
 
 # ── AT Bytecode (compiled from SignaAIEscrow.java via SmartJ) ─────────────────
 AT_CODE_HEX = (
@@ -306,8 +307,9 @@ def main():
 
     elif args.cmd == "deploy":
         print(f"Deploying SignaAI Escrow AT on {args.network}...")
+        passphrase = resolve_passphrase(args.payer_passphrase, prompt="Payer passphrase")
         result, err = deploy_at(
-            args.payer_passphrase, args.worker_address,
+            passphrase, args.worker_address,
             args.deadline_minutes, args.preimage_hex, args.network
         )
         if err:
@@ -325,8 +327,9 @@ def main():
 
     elif args.cmd == "submit":
         print(f"Submitting preimage to AT {args.at_address}...")
+        passphrase = resolve_passphrase(args.worker_passphrase, prompt="Worker passphrase")
         result, err = submit_preimage(
-            args.worker_passphrase, args.at_address,
+            passphrase, args.at_address,
             args.preimage_hex, args.network
         )
         if err:

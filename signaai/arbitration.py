@@ -26,6 +26,7 @@ import hashlib
 sys.path.insert(0, os.path.dirname(__file__))
 from .api import get_api, signa, ts, FEE_MESSAGE, ok
 from .wallet import get_my_address
+from .cli_secrets import resolve_passphrase
 from .protocol import build_arbit_open, build_arbit_vote, parse_arbitration, ProtocolError
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -298,8 +299,9 @@ def main():
     os.environ["SIGNUM_NETWORK"] = args.network
 
     if args.cmd == "open":
+        passphrase = resolve_passphrase(args.passphrase, prompt="Claimant passphrase")
         result, err = open_arbitration(
-            args.passphrase, args.escrow_id,
+            passphrase, args.escrow_id,
             args.arbitrator_address, args.reason, args.network
         )
         if err:
@@ -313,8 +315,9 @@ def main():
             print(f"\n  {result['note']}")
 
     elif args.cmd == "vote":
+        passphrase = resolve_passphrase(args.passphrase, prompt="Arbitrator passphrase")
         result, err = vote_arbitration(
-            args.passphrase, args.escrow_id,
+            passphrase, args.escrow_id,
             args.decision, args.notes, args.network
         )
         if err:
@@ -343,8 +346,9 @@ def main():
                 print(f"    [{v['timestamp']}] {v['arbitrator'][:20]}... → {v['decision']}")
 
     elif args.cmd == "register-arbitrator":
+        passphrase = resolve_passphrase(args.passphrase, prompt="Arbitrator passphrase")
         result, err = register_arbitrator(
-            args.passphrase, args.name, args.description, args.network
+            passphrase, args.name, args.description, args.network
         )
         if err:
             print(f"Error: {err}")

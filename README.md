@@ -40,6 +40,34 @@ Requires Python 3.9+.
 
 ---
 
+## Building Blocks
+
+SignaAI is a primitives-first SDK. The pieces are intentionally small so
+developers can compose their own agent workflows.
+
+| Primitive | What it gives developers |
+|---|---|
+| `wallet` | Send SIGNA, read balances, inspect payment history |
+| `identity` | Register agents and build counterparty-signed reputation |
+| `verify` | Hash and timestamp AI outputs on-chain |
+| `protocol` | Parse/build compact SignaAI messages without network calls |
+| `events` | Normalize raw Signum transactions for dashboards and indexers |
+| `escrow` | Operator-mediated escrow audit trail for early workflows |
+| `at_escrow` | Trustless hash-preimage escrow held by a Signum AT contract |
+| `arbitration` | Public dispute-open and decision records |
+
+CLI commands that take a passphrase accept `-` to prompt securely:
+
+```bash
+signaai-wallet --network testnet send - S-RECIPIENT 1.0
+signaai-verify --network testnet stamp - "output text" --label task-001
+```
+
+They also accept `env:VAR_NAME` when an agent runtime injects secrets through
+environment variables.
+
+---
+
 ## Quick Start
 
 ```python
@@ -94,7 +122,7 @@ txs, err = wallet.get_transactions("S-XXXX-XXXX-XXXX-XXXXX", limit=10)
 CLI:
 ```bash
 signaai-wallet --network mainnet balance S-XXXX-XXXX-XXXX-XXXXX
-signaai-wallet --network mainnet send "passphrase" S-XXXX-XXXX-XXXX-XXXXX 5.0
+signaai-wallet --network mainnet send - S-XXXX-XXXX-XXXX-XXXXX 5.0
 signaai-wallet --network mainnet history S-XXXX-XXXX-XXXX-XXXXX
 ```
 
@@ -122,14 +150,28 @@ agent, err = identity.lookup_agent("my-research-agent")
 
 # Get reputation score (derived from transaction count and history)
 rep, err = identity.get_reputation("S-XXXX-XXXX-XXXX-XXXXX")
+
+# Record a counterparty-signed rating for a worker
+rating, err = identity.record_task_rating(
+    "payer passphrase",
+    task_id="task-001",
+    worker_address="S-WORKER-ADDRESS",
+    result_hash="<submitted result hash>",
+    rating=5,
+)
 ```
 
 CLI:
 ```bash
-signaai-identity --network mainnet register "passphrase" my-agent --capabilities research,summarization
+signaai-identity --network mainnet register - my-agent --capabilities research,summarization
 signaai-identity --network mainnet lookup my-agent
 signaai-identity --network mainnet reputation S-XXXX-XXXX-XXXX-XXXXX
+signaai-identity --network mainnet rate - task-001 S-WORKER RESULT_HASH --rating 5
 ```
+
+`TASK_COMPLETE` records are legacy/self-reported. New reputation flows should
+prefer `TASK_RATING`, where the payer, verifier, or arbitrator signs the rating
+and sends it to the worker's account.
 
 ---
 
@@ -157,7 +199,7 @@ ok, err = verify.check(
 
 CLI:
 ```bash
-signaai-verify --network mainnet stamp "passphrase" "output text" --label task-001
+signaai-verify --network mainnet stamp - "output text" --label task-001
 signaai-verify --network mainnet check "output text" --tx TX_ID
 ```
 
@@ -185,7 +227,29 @@ Supported message families:
 - `SIGPROOF:v1:...`
 - `ESCROW:CREATE|FUND|SUBMIT|RELEASE|REFUND|ASSIGN:...`
 - `TASK_COMPLETE:...`
+- `TASK_RATING:...`
 - `ARBIT_OPEN|ARBIT_VOTE|ARBIT_CLOSE:...`
+
+---
+
+### Events (indexer and dashboard helper)
+
+Normalize raw Signum transactions into consistent event dictionaries.
+
+```python
+from signaai import events
+
+items, err = events.get_account_events(
+    "S-XXXX-XXXX-XXXX-XXXXX",
+    limit=50,
+    protocol_only=True,
+)
+```
+
+CLI:
+```bash
+signaai-events --network mainnet S-XXXX-XXXX-XXXX-XXXXX --protocol-only
+```
 
 ---
 
@@ -225,10 +289,10 @@ result, err = escrow.refund_escrow("operator passphrase", escrow_id)
 
 CLI:
 ```bash
-signaai-escrow --network mainnet create "payer pass" S-WORKER 10.0 "task description" --deadline-hours 24 --operator-address S-OPERATOR
+signaai-escrow --network mainnet create - S-WORKER 10.0 "task description" --deadline-hours 24 --operator-address S-OPERATOR
 signaai-escrow --network mainnet status ESCROW_ID --address S-OPERATOR
-signaai-escrow --network mainnet release "operator pass" ESCROW_ID --expected-hash RESULT_HASH
-signaai-escrow --network mainnet refund "operator pass" ESCROW_ID
+signaai-escrow --network mainnet release - ESCROW_ID --expected-hash RESULT_HASH
+signaai-escrow --network mainnet refund - ESCROW_ID
 ```
 
 Phase 1 escrow is operator-mediated. Funds are sent to the operator wallet and
@@ -277,13 +341,13 @@ CLI:
 signaai-at gen-preimage
 
 # Deploy contract
-signaai-at --network mainnet deploy "payer pass" S-WORKER 1440 PREIMAGE_HEX
+signaai-at --network mainnet deploy - S-WORKER 1440 PREIMAGE_HEX
 
 # Fund it
-signaai-wallet --network mainnet send "payer pass" S-AT-ADDRESS 10.0
+signaai-wallet --network mainnet send - S-AT-ADDRESS 10.0
 
 # Worker claims payment
-signaai-at --network mainnet submit "worker pass" S-AT-ADDRESS PREIMAGE_HEX
+signaai-at --network mainnet submit - S-AT-ADDRESS PREIMAGE_HEX
 
 # Check status
 signaai-at --network mainnet info S-AT-ADDRESS
@@ -295,6 +359,7 @@ signaai-at --network mainnet info S-AT-ADDRESS
 
 ```bash
 export SIGNUM_NETWORK=mainnet  # default all calls to mainnet
+export SIGNAAI_PASSPHRASE="..."  # optional; prefer runtime secret injection
 ```
 
 Or call `signaai.network("mainnet")` once at startup.
@@ -352,6 +417,8 @@ the SDK.
 
 - Prefer testnet until your agent workflow is fully rehearsed.
 - Avoid passing real wallet passphrases on shared machines or in shell history.
+  For CLI use, pass `-` to prompt securely or `env:VAR_NAME` when your agent
+  runtime injects secrets.
 - Phase 1 escrow is an auditable operator-mediated flow, not trustless custody.
 - AT escrow is the trustless path, but should be validated on testnet before
   handling meaningful value.
@@ -388,9 +455,11 @@ signaai/
 ├── identity.py     — Agent registry, reputation scoring
 ├── verify.py       — Output stamping and verification
 ├── protocol.py     — Parse/build on-chain SignaAI messages
+├── events.py       — Normalize raw transactions into SignaAI events
 ├── escrow.py       — Phase 1 operator-mediated escrow
 ├── at_escrow.py    — Phase 2 trustless AT smart contract escrow
 ├── arbitration.py  — Dispute records and arbitrator decisions
+├── cli_secrets.py  — CLI passphrase prompting/env resolution
 └── contracts/
     └── signaai_escrow.smart   — AT bytecode source
 ```

@@ -12,6 +12,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(__file__))
 from .api import get_api, signa, nqt, ts, fmt_address, FEE_STANDARD, FEE_MESSAGE, ok
+from .cli_secrets import resolve_passphrase
 
 
 def get_account(address, network=None):
@@ -159,7 +160,8 @@ def main():
 
     elif args.cmd == "send":
         print(f"Sending {args.amount} SIGNA to {args.recipient}...")
-        tx_id, err = send_signa(args.passphrase, args.recipient, args.amount,
+        passphrase = resolve_passphrase(args.passphrase, prompt="Sender passphrase")
+        tx_id, err = send_signa(passphrase, args.recipient, args.amount,
                                 args.message, network=args.network)
         if err:
             print(f"Error: {err}")
@@ -179,7 +181,8 @@ def main():
                 print(f"{tx['timestamp']:<18} {direction:<20} {tx['amount']:>11.4f}Σ  {tx['message'][:20]}")
 
     elif args.cmd == "myaddress":
-        addr, err = get_my_address(args.passphrase, args.network)
+        passphrase = resolve_passphrase(args.passphrase, prompt="Wallet passphrase")
+        addr, err = get_my_address(passphrase, args.network)
         if err:
             print(f"Error: {err}")
         else:

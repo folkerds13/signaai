@@ -27,6 +27,7 @@ import hashlib
 sys.path.insert(0, os.path.dirname(__file__))
 from .api import get_api, ts, FEE_MESSAGE, ok
 from .wallet import get_my_address
+from .cli_secrets import resolve_passphrase
 from .protocol import build_sigproof, parse_sigproof, ProtocolError
 
 
@@ -263,7 +264,8 @@ def main():
             print(f"Sources ({len(sources)}): {', '.join(sources)}")
 
     elif args.cmd == "publish":
-        result, err = publish_proof(args.passphrase, args.content_hash,
+        passphrase = resolve_passphrase(args.passphrase, prompt="Publisher passphrase")
+        result, err = publish_proof(passphrase, args.content_hash,
                                     args.sources_hash, args.label, args.network)
         if err:
             print(f"Error: {err}")
@@ -278,7 +280,8 @@ def main():
         sources = [s.strip() for s in args.sources.split(",") if s.strip()]
         h = hash_content(args.content, sources)
         print(f"Content hash: {h['content_hash']}")
-        result, err = publish_proof(args.passphrase, h['content_hash'],
+        passphrase = resolve_passphrase(args.passphrase, prompt="Publisher passphrase")
+        result, err = publish_proof(passphrase, h['content_hash'],
                                     h['sources_hash'], args.label, args.network)
         if err:
             print(f"Error publishing: {err}")

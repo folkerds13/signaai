@@ -33,6 +33,7 @@ import time
 sys.path.insert(0, os.path.dirname(__file__))
 from .api import get_api, nqt, ts, FEE_MESSAGE, ok
 from .wallet import get_my_address, send_signa
+from .cli_secrets import resolve_passphrase
 from .verify import hash_content, publish_proof
 from .protocol import (
     build_escrow_create,
@@ -492,8 +493,9 @@ def main():
 
     if args.cmd == "create":
         print(f"Creating escrow on {args.network}...")
+        passphrase = resolve_passphrase(args.payer_passphrase, prompt="Payer passphrase")
         result, err = create_escrow(
-            args.payer_passphrase, args.worker_address, args.amount,
+            passphrase, args.worker_address, args.amount,
             args.task_description, args.deadline_hours,
             operator_address=args.operator_address,
             network=args.network
@@ -516,8 +518,9 @@ def main():
     elif args.cmd == "submit":
         sources = [s.strip() for s in args.sources.split(",") if s.strip()]
         print(f"Submitting result for escrow {args.escrow_id}...")
+        passphrase = resolve_passphrase(args.worker_passphrase, prompt="Worker passphrase")
         result, err = submit_result(
-            args.worker_passphrase, args.escrow_id,
+            passphrase, args.escrow_id,
             args.result_content, sources, args.network
         )
         if err:
@@ -531,8 +534,9 @@ def main():
 
     elif args.cmd == "release":
         print(f"Releasing escrow {args.escrow_id}...")
+        passphrase = resolve_passphrase(args.operator_passphrase, prompt="Operator passphrase")
         result, err = release_payment(
-            args.operator_passphrase, args.escrow_id,
+            passphrase, args.escrow_id,
             expected_result_hash=args.expected_hash,
             approve=args.approve,
             network=args.network
@@ -547,8 +551,9 @@ def main():
 
     elif args.cmd == "refund":
         print(f"Refunding escrow {args.escrow_id}...")
+        passphrase = resolve_passphrase(args.operator_passphrase, prompt="Operator passphrase")
         result, err = refund_escrow(
-            args.operator_passphrase, args.escrow_id, args.network
+            passphrase, args.escrow_id, args.network
         )
         if err:
             print(f"Error: {err}")
