@@ -1,0 +1,32 @@
+name: publish
+
+# Publishes to PyPI when a version tag is pushed (e.g. v0.3.1).
+# Uses PyPI Trusted Publishing (OIDC) — one-time setup required on PyPI:
+#   pypi.org → project "signaai" → Publishing → add GitHub publisher
+#   (owner: folkerds13, repo: signaai, workflow: publish.yml).
+# No token or secret is stored in this repository.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tag matches package version
+        run: |
+          TOML_VERSION=$(grep '^version' pyproject.toml | cut -d'"' -f2)
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          [ "$TOML_VERSION" = "$TAG_VERSION" ] || { echo "Tag $GITHUB_REF_NAME != pyproject $TOML_VERSION"; exit 1; }
+      - run: pip install build
+      - run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1

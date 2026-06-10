@@ -23,7 +23,6 @@ import sys
 import os
 import json
 import hashlib
-sys.path.insert(0, os.path.dirname(__file__))
 from .api import get_api, signa, ts, FEE_MESSAGE, ok
 from .wallet import get_my_address
 from .cli_secrets import resolve_passphrase

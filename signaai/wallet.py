@@ -10,8 +10,7 @@ Usage:
 """
 import sys
 import os
-sys.path.insert(0, os.path.dirname(__file__))
-from .api import get_api, signa, nqt, ts, fmt_address, FEE_STANDARD, FEE_MESSAGE, ok
+from .api import get_api, signa, nqt, ts, fmt_address, FEE_STANDARD, FEE_MESSAGE, fee_message, ok
 from .cli_secrets import resolve_passphrase
 
 
@@ -53,7 +52,7 @@ def send_signa(passphrase, recipient, amount_signa=None, message=None,
     if amount_nqt <= 0:
         return None, "Amount must be greater than zero"
 
-    fee = FEE_MESSAGE if message else FEE_STANDARD
+    fee = fee_message(message) if message else FEE_STANDARD
 
     params = {
         "secretPhrase": passphrase,
@@ -104,11 +103,19 @@ def get_transactions(address, limit=10, network=None):
 
 
 def get_my_address(passphrase, network=None):
-    """Derive the address for a given passphrase (without sending anything)."""
+    """Derive the address for a given passphrase — locally.
+
+    The key pair is derived on this machine and only the public key is sent
+    to the node. The passphrase itself never leaves the process.
+    """
+    if not passphrase or not str(passphrase).strip():
+        return None, "Passphrase cannot be empty"
+    from .crypto import generate_sign_keys
+    keys = generate_sign_keys(passphrase)
     api = get_api(network)
-    result = api.get("getAccountId", secretPhrase=passphrase)
+    result = api.get("getAccountId", publicKey=keys["publicKey"])
     if not ok(result):
-        return None, result.get("error")
+        return None, result.get("errorDescription") or result.get("error")
     return result.get("accountRS"), None
 
 

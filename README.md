@@ -54,14 +54,14 @@ print(f"{bal['confirmed']:.4f} SIGNA")
 
 # Register your agent
 signaai.identity.register_agent(
-    "your secret passphrase",
+    os.environ["WALLET_SECRET"],   # passphrase — never hard-code it
     "my-agent",
     capabilities=["research", "summarization"]
 )
 
 # Stamp an output on-chain
 signaai.verify.stamp(
-    "your secret passphrase",
+    os.environ["WALLET_SECRET"],
     "The answer to the task is 42.",
     label="task-001"
 )
@@ -82,7 +82,7 @@ bal, err = wallet.get_balance("S-XXXX-XXXX-XXXX-XXXXX")
 
 # Send SIGNA
 result, err = wallet.send_signa(
-    "payer passphrase",
+    os.environ["WALLET_SECRET"],
     recipient="S-XXXX-XXXX-XXXX-XXXXX",
     amount=5.0
 )
@@ -94,7 +94,7 @@ txs, err = wallet.get_transactions("S-XXXX-XXXX-XXXX-XXXXX", limit=10)
 CLI:
 ```bash
 signaai-wallet --network mainnet balance S-XXXX-XXXX-XXXX-XXXXX
-signaai-wallet --network mainnet send "passphrase" S-XXXX-XXXX-XXXX-XXXXX 5.0
+signaai-wallet --network mainnet send env:WALLET_SECRET S-XXXX-XXXX-XXXX-XXXXX 5.0
 signaai-wallet --network mainnet history S-XXXX-XXXX-XXXX-XXXXX
 ```
 
@@ -109,7 +109,7 @@ from signaai import identity
 
 # Register your agent
 result, err = identity.register_agent(
-    "your passphrase",
+    os.environ["WALLET_SECRET"],
     "my-research-agent",
     capabilities=["research", "web-search"],
     endpoint="https://myagent.example.com",
@@ -126,7 +126,7 @@ rep, err = identity.get_reputation("S-XXXX-XXXX-XXXX-XXXXX")
 
 CLI:
 ```bash
-signaai-identity --network mainnet register "passphrase" my-agent --capabilities research,summarization
+signaai-identity --network mainnet register env:WALLET_SECRET my-agent --capabilities research,summarization
 signaai-identity --network mainnet lookup my-agent
 signaai-identity --network mainnet reputation S-XXXX-XXXX-XXXX-XXXXX
 ```
@@ -142,7 +142,7 @@ from signaai import verify
 
 # Stamp output on-chain
 result, err = verify.stamp(
-    "your passphrase",
+    os.environ["WALLET_SECRET"],
     "The quarterly revenue was $4.2M, up 12% YoY.",
     label="report-2026-Q1"
 )
@@ -157,7 +157,7 @@ ok, err = verify.check(
 
 CLI:
 ```bash
-signaai-verify --network mainnet stamp "passphrase" "output text" --label task-001
+signaai-verify --network mainnet stamp env:WALLET_SECRET "output text" --label task-001
 signaai-verify --network mainnet check "output text" --tx TX_ID
 ```
 
@@ -198,7 +198,7 @@ from signaai import escrow
 
 # Payer creates escrow
 result, err = escrow.create_escrow(
-    "payer passphrase",
+    os.environ["WALLET_SECRET"],
     worker_address="S-WORKER-ADDRESS",
     amount=10.0,
     task_description="Summarize these 5 documents",
@@ -249,7 +249,7 @@ preimage, preimage_hash = at_escrow.gen_preimage()
 
 # 2. Deploy the escrow contract
 result, err = at_escrow.deploy_at(
-    "payer passphrase",
+    os.environ["WALLET_SECRET"],
     worker_address="S-WORKER-ADDRESS",
     deadline_minutes=1440,  # 24 hours
     preimage_hex=preimage
@@ -257,12 +257,12 @@ result, err = at_escrow.deploy_at(
 at_address = result["at_address"]
 
 # 3. Fund the contract (send SIGNA to the AT address)
-wallet.send_signa("payer passphrase", at_address, amount=10.0)
+wallet.send_signa(os.environ["WALLET_SECRET"], at_address, amount=10.0)
 
 # 4. Verify worker's output, then reveal the preimage to them
 # Worker submits preimage — AT auto-pays, no operator needed
 result, err = at_escrow.submit_preimage(
-    "worker passphrase",
+    os.environ["WALLET_SECRET"],
     at_address=at_address,
     preimage_hex=preimage
 )

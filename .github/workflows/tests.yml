@@ -17,3 +17,19 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install pytest
       - run: python -m pytest tests/ -q
+      - name: Version consistency (pyproject == __version__)
+        run: |
+          pip install -e . --quiet
+          PY_VERSION=$(python -c "import signaai; print(signaai.__version__)")
+          TOML_VERSION=$(grep '^version' pyproject.toml | cut -d'"' -f2)
+          [ "$PY_VERSION" = "$TOML_VERSION" ] || { echo "Version mismatch: __version__=$PY_VERSION pyproject=$TOML_VERSION"; exit 1; }
+      - name: Console scripts smoke
+        run: |
+          for cmd in signaai-wallet signaai-identity signaai-verify signaai-escrow \
+                     signaai-at signaai-arbitrate signaai-listen signaai-board signaai-events; do
+            $cmd --help > /dev/null || { echo "$cmd --help failed"; exit 1; }
+          done
+      - name: No literal passphrases in docs
+        run: |
+          ! grep -rn -iE '"(your |payer |worker |secret )?passphrase( here)?"' README.md examples/ \
+            || { echo "Literal passphrase placeholder found in docs"; exit 1; }

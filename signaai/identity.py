@@ -120,6 +120,47 @@ def lookup_agent(agent_name, network=None):
     }, None
 
 
+def verify_agent(agent_name, network=None):
+    """
+    Verify an agent's identity — confirm the alias is owned by the claimed
+    address. Aliases are cryptographically tied to their owner's key pair in
+    Signum, so a match proves the metadata was set by the address holder.
+    """
+    api = get_api(network)
+    name_slug = agent_name.lower().replace(' ', '').replace('-', '').replace('_', '')
+    name_hash = hashlib.sha256(name_slug.encode()).hexdigest()[:8]
+    alias = f"{ALIAS_PREFIX}{name_slug}-{name_hash}"
+
+    alias_result = api.get("getAlias", aliasName=alias)
+    if not ok(alias_result):
+        return None, f"Agent '{agent_name}' not found"
+
+    alias_owner_id = alias_result.get("account", "")
+    owner_info = api.get("getAccount", account=alias_owner_id) if alias_owner_id else {}
+    alias_owner = owner_info.get("accountRS", alias_owner_id)
+
+    uri = alias_result.get("aliasURI", "")
+    metadata = {}
+    if "sig-agent:" in uri:
+        try:
+            metadata = json.loads(uri.split("sig-agent:")[1])
+        except Exception:
+            pass
+
+    claimed_address = metadata.get("address", "")
+    verified = bool(claimed_address) and alias_owner == claimed_address
+
+    return {
+        "alias":           alias,
+        "alias_owner":     alias_owner,
+        "claimed_address": claimed_address,
+        "verified":        verified,
+        "name":            metadata.get("name", agent_name),
+        "capabilities":    metadata.get("capabilities", []),
+        "description":     metadata.get("description", ""),
+    }, None
+
+
 def get_agent_profile(address, network=None):
     """
     Get a full agent profile: registration + reputation from on-chain history.
@@ -344,6 +385,9 @@ def main():
 
     sub.add_parser("list", help="List all registered agents")
 
+    p = sub.add_parser("verify", help="Verify an agent's identity (alias owner check)")
+    p.add_argument("agent_name")
+
     p = sub.add_parser("search", help="Search marketplace by capability")
     p.add_argument("capability", nargs="?", default=None,
                    help="Capability to search for (e.g. 'research', 'trading')")
@@ -422,6 +466,19 @@ def main():
             for a in agents:
                 caps = ", ".join(a['capabilities']) if a['capabilities'] else "—"
                 print(f"  {a['alias']:<30} {a['address']:<20} [{caps}]")
+
+    elif args.cmd == "verify":
+        result, err = verify_agent(args.agent_name, args.network)
+        if err:
+            print(f"Error: {err}")
+        else:
+            mark = "✓ VERIFIED" if result["verified"] else "✗ NOT VERIFIED"
+            print(f"{mark}  {result['name']}")
+            print(f"  Alias:           {result['alias']}")
+            print(f"  Alias owner:     {result['alias_owner']}")
+            print(f"  Claimed address: {result['claimed_address'] or '(none)'}")
+            if result["capabilities"]:
+                print(f"  Capabilities:    {', '.join(result['capabilities'])}")
 
     elif args.cmd == "search":
         agents = search_agents(capability=args.capability, network=args.network)

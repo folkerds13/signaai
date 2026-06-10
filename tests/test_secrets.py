@@ -36,41 +36,75 @@ class TestResolvePassphrase(unittest.TestCase):
         with self.assertRaises(ValueError):
             resolve_passphrase("@file:/nonexistent/path/to/pass.txt")
 
-    def test_worker_json(self):
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump({"passphrase": "worker-secret"}, f)
-            path = f.name
+    def _with_worker_paths(self, paths):
         import signaai.cli_secrets as cs
-        original = cs._WORKER_JSON
-        cs._WORKER_JSON = path
+        original = cs.WORKER_CONFIG_PATHS
+        cs.WORKER_CONFIG_PATHS = paths
+
+        def restore():
+            cs.WORKER_CONFIG_PATHS = original
+        return restore
+
+    def _temp_config(self, payload):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(payload, f)
+            return f.name
+
+    def test_worker_json(self):
+        path = self._temp_config({"passphrase": "worker-secret"})
+        restore = self._with_worker_paths([path])
         try:
             self.assertEqual(resolve_passphrase("@worker"), "worker-secret")
         finally:
-            cs._WORKER_JSON = original
+            restore()
+            os.unlink(path)
+
+    def test_worker_json_second_path_wins_when_first_missing(self):
+        path = self._temp_config({"passphrase": "hermes-secret"})
+        restore = self._with_worker_paths(["/nonexistent/worker.json", path])
+        try:
+            self.assertEqual(resolve_passphrase("@worker"), "hermes-secret")
+        finally:
+            restore()
             os.unlink(path)
 
     def test_worker_json_missing_raises(self):
-        import signaai.cli_secrets as cs
-        original = cs._WORKER_JSON
-        cs._WORKER_JSON = "/nonexistent/worker.json"
+        restore = self._with_worker_paths(["/nonexistent/worker.json"])
         try:
             with self.assertRaises(ValueError):
                 resolve_passphrase("@worker")
         finally:
-            cs._WORKER_JSON = original
+            restore()
 
     def test_worker_json_missing_key_raises(self):
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump({"other_key": "val"}, f)
-            path = f.name
-        import signaai.cli_secrets as cs
-        original = cs._WORKER_JSON
-        cs._WORKER_JSON = path
+        path = self._temp_config({"other_key": "val"})
+        restore = self._with_worker_paths([path])
         try:
             with self.assertRaises(ValueError):
                 resolve_passphrase("@worker")
         finally:
-            cs._WORKER_JSON = original
+            restore()
+            os.unlink(path)
+
+    def test_worker_json_nested_env_spec(self):
+        path = self._temp_config({"passphrase": "env:SIGNAAI_NESTED_TEST"})
+        restore = self._with_worker_paths([path])
+        os.environ["SIGNAAI_NESTED_TEST"] = "resolved-from-env"
+        try:
+            self.assertEqual(resolve_passphrase("@worker"), "resolved-from-env")
+        finally:
+            restore()
+            del os.environ["SIGNAAI_NESTED_TEST"]
+            os.unlink(path)
+
+    def test_worker_json_recursive_worker_spec_raises(self):
+        path = self._temp_config({"passphrase": "@worker"})
+        restore = self._with_worker_paths([path])
+        try:
+            with self.assertRaises(ValueError):
+                resolve_passphrase("@worker")
+        finally:
+            restore()
             os.unlink(path)
 
 

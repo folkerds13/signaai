@@ -24,7 +24,6 @@ import sys
 import os
 import json
 import hashlib
-sys.path.insert(0, os.path.dirname(__file__))
 from .api import get_api, ts, FEE_MESSAGE, ok
 from .cli_secrets import resolve_passphrase
 from .wallet import get_my_address

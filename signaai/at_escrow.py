@@ -24,7 +24,6 @@ import struct
 import hashlib
 import secrets
 import math
-sys.path.insert(0, os.path.dirname(__file__))
 from .api import get_api, signa, nqt, FEE_STANDARD, FEE_MESSAGE, ok
 from .cli_secrets import resolve_passphrase
 from .wallet import get_my_address, send_signa

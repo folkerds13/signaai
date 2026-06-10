@@ -38,6 +38,7 @@ import time
 
 from .api import get_api, nqt, signa, ok, fee_message, ts, EXPLORER_URL
 from .wallet import get_my_address
+from .cli_secrets import resolve_passphrase
 from .protocol import (
     build_task_open, build_task_claim, build_task_accept, build_task_cancel,
     parse_task, TaskMessage, TASK_PREFIX, ProtocolError,
@@ -321,7 +322,7 @@ def main():
     try:
         if args.cmd == "open":
             task_id, tx_id = open_task(
-                args.passphrase, args.task_hash, args.capability,
+                resolve_passphrase(args.passphrase), args.task_hash, args.capability,
                 args.amount, args.deadline_hours,
                 getattr(args, "summary", ""), board, args.network)
             print(f"Task opened")
@@ -330,17 +331,17 @@ def main():
             print(f"  View:    {EXPLORER_URL}/tx/{tx_id}")
 
         elif args.cmd == "claim":
-            tx_id = claim_task(args.passphrase, args.task_id, board, args.network)
+            tx_id = claim_task(resolve_passphrase(args.passphrase), args.task_id, board, args.network)
             print(f"Claim submitted — TX: {tx_id}")
 
         elif args.cmd == "accept":
-            tx_id = accept_claim(args.passphrase, args.task_id,
+            tx_id = accept_claim(resolve_passphrase(args.passphrase), args.task_id,
                                  args.worker_address, board, args.network)
             print(f"Claim accepted — worker: {args.worker_address}  TX: {tx_id}")
             print(f"Next step: create escrow with this worker via signaai-escrow")
 
         elif args.cmd == "cancel":
-            tx_id = cancel_task(args.passphrase, args.task_id, board, args.network)
+            tx_id = cancel_task(resolve_passphrase(args.passphrase), args.task_id, board, args.network)
             print(f"Task cancelled — TX: {tx_id}")
 
         elif args.cmd == "tasks":

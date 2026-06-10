@@ -30,7 +30,6 @@ import json
 import hashlib
 import secrets
 import time
-sys.path.insert(0, os.path.dirname(__file__))
 from .api import get_api, nqt, ts, FEE_MESSAGE, ok
 from .wallet import get_my_address, send_signa
 from .verify import hash_content, publish_proof

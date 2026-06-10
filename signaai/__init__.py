@@ -34,7 +34,7 @@ from .listener import SignaAIListener, TaskEvent, ResultEvent, ReleaseEvent, Pro
 from .protocol import TaskMessage
 from .crypto import generate_sign_keys, generate_signature, verify_signature
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 __author__  = "SignaAI"
 
 
